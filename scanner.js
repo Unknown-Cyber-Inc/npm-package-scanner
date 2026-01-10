@@ -58,7 +58,7 @@ const MAGIC_SIGNATURES = {
 
 // Directories to skip for faster scanning
 const SKIP_DIRS = new Set([
-  '.bin', '.cache', '.git', '.github', '.vscode',
+  '.cache', '.git', '.github', '.vscode',
   '__tests__', '__mocks__', 'test', 'tests', 'spec', 'specs',
   'docs', 'doc', 'documentation', 'example', 'examples',
   'coverage', '.nyc_output', 'typings', '@types'
