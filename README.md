@@ -180,6 +180,16 @@ node scanner.js --upload
 | WebAssembly | `.wasm` |
 | General | `.bin`, `.dat` |
 
+## Detected Script Types
+
+Executable scripts are also detected as potential attack vectors:
+
+| Platform | Extensions |
+|----------|------------|
+| Windows | `.bat`, `.cmd`, `.ps1`, `.vbs`, `.vbe`, `.wsf`, `.wsh` |
+| Unix/Linux | `.sh`, `.bash`, `.zsh`, `.csh`, `.ksh` |
+| Cross-platform | `.pl` (Perl), `.rb` (Ruby), `.py`, `.pyw` (Python) |
+
 ## Upload Details
 
 When uploading to UnknownCyber, each binary is tagged with:

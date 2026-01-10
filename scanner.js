@@ -15,7 +15,7 @@ const { URL } = require('url');
 
 // Binary file extensions to look for
 const BINARY_EXTENSIONS = new Set([
-  // Windows
+  // Windows executables
   '.exe', '.dll', '.sys', '.ocx', '.com', '.scr',
   // Linux/Unix
   '.so', '.o', '.a',
@@ -27,6 +27,16 @@ const BINARY_EXTENSIONS = new Set([
   '.bin', '.dat',
   // WebAssembly
   '.wasm'
+]);
+
+// Executable script extensions (text-based but can execute malicious code)
+const SCRIPT_EXTENSIONS = new Set([
+  // Windows scripts
+  '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.wsf', '.wsh',
+  // Unix shell scripts
+  '.sh', '.bash', '.zsh', '.csh', '.ksh',
+  // Other scripting languages commonly used in attacks
+  '.pl', '.rb', '.py', '.pyw'
 ]);
 
 // Magic bytes signatures for binary detection (hex)
@@ -99,6 +109,14 @@ function checkMagicBytes(filePath) {
 function isBinaryByExtension(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return BINARY_EXTENSIONS.has(ext);
+}
+
+/**
+ * Check if a file is an executable script by extension
+ */
+function isScriptByExtension(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return SCRIPT_EXTENSIONS.has(ext);
 }
 
 /**
@@ -183,30 +201,38 @@ function scanDirectory(dir, nodeModulesRoot, results, visited = new Set()) {
       } else if (entry.isFile()) {
         scannedFiles++;
         
-        // Skip files that definitely won't be binaries
+        // Skip files that definitely won't be binaries or scripts
         if (shouldSkipFile(entry.name)) continue;
         
-        let binaryType = null;
+        let detectedType = null;
+        let category = 'binary'; // 'binary' or 'script'
         
-        // Check by extension first (faster)
+        // Check for binary by extension first (faster)
         if (isBinaryByExtension(fullPath)) {
-          binaryType = path.extname(fullPath).toLowerCase().slice(1).toUpperCase();
-        } else if (deepMagicScan) {
-          // Only check magic bytes if deep scan is enabled (slower but more thorough)
+          detectedType = path.extname(fullPath).toLowerCase().slice(1).toUpperCase();
+        } 
+        // Check for executable scripts
+        else if (isScriptByExtension(fullPath)) {
+          detectedType = path.extname(fullPath).toLowerCase().slice(1).toUpperCase();
+          category = 'script';
+        }
+        // Deep scan: check magic bytes for binaries without known extensions
+        else if (deepMagicScan) {
           const magicType = checkMagicBytes(fullPath);
           if (magicType) {
-            binaryType = magicType;
+            detectedType = magicType;
           }
         }
 
-        if (binaryType) {
+        if (detectedType) {
           const packageInfo = findPackageInfo(fullPath, nodeModulesRoot);
           const relativePath = path.relative(nodeModulesRoot, fullPath);
           
           results.push({
             file: relativePath,
             absolutePath: fullPath,
-            type: binaryType,
+            type: detectedType,
+            category: category,
             package: packageInfo ? packageInfo.name : 'unknown',
             version: packageInfo ? packageInfo.version : 'unknown',
             packagePath: packageInfo ? packageInfo.relativePath : 'unknown'
@@ -434,6 +460,9 @@ async function scanNodeModules(targetDir, options = {}) {
 
   // Group results by package
   const byPackage = {};
+  let totalBinaries = 0;
+  let totalScripts = 0;
+  
   for (const result of results) {
     const key = `${result.package}@${result.version}`;
     if (!byPackage[key]) {
@@ -445,8 +474,15 @@ async function scanNodeModules(targetDir, options = {}) {
     }
     byPackage[key].files.push({
       file: result.file,
-      type: result.type
+      type: result.type,
+      category: result.category || 'binary'
     });
+    
+    if (result.category === 'script') {
+      totalScripts++;
+    } else {
+      totalBinaries++;
+    }
   }
 
   // Sort packages alphabetically
@@ -456,12 +492,12 @@ async function scanNodeModules(targetDir, options = {}) {
 
   // Output results
   console.log('='.repeat(80));
-  console.log('BINARY FILES FOUND IN NODE_MODULES');
+  console.log('EXECUTABLES FOUND IN NODE_MODULES');
   console.log('='.repeat(80));
   console.log();
 
   if (sortedPackages.length === 0) {
-    console.log('No binary files found.');
+    console.log('No executable files found.');
   } else {
     let totalFiles = 0;
     
@@ -470,7 +506,9 @@ async function scanNodeModules(targetDir, options = {}) {
       console.log('-'.repeat(60));
       
       for (const file of pkg.files) {
-        console.log(`   [\x1b[32m${file.type.padEnd(8)}\x1b[0m] ${file.file}`);
+        const categoryIcon = file.category === 'script' ? '📜' : '⚙️';
+        const typeColor = file.category === 'script' ? '\x1b[35m' : '\x1b[32m'; // magenta for scripts, green for binaries
+        console.log(`   ${categoryIcon} [${typeColor}${file.type.padEnd(8)}\x1b[0m] ${file.file}`);
         totalFiles++;
       }
       console.log();
@@ -479,8 +517,10 @@ async function scanNodeModules(targetDir, options = {}) {
     console.log('='.repeat(80));
     console.log('SUMMARY');
     console.log('='.repeat(80));
-    console.log(`Total packages with binaries: ${sortedPackages.length}`);
-    console.log(`Total binary files found: ${totalFiles}`);
+    console.log(`Total packages with executables: ${sortedPackages.length}`);
+    console.log(`Total executable files found: ${totalFiles}`);
+    console.log(`  - Binary files: ${totalBinaries}`);
+    console.log(`  - Script files: ${totalScripts}`);
     console.log(`Directories scanned: ${scannedDirs}`);
     console.log(`Files checked: ${scannedFiles}`);
     console.log(`Scan completed in: ${elapsed}s`);
@@ -492,7 +532,9 @@ async function scanNodeModules(targetDir, options = {}) {
     scanDate: new Date().toISOString(),
     deepScan: deepMagicScan,
     totalPackages: sortedPackages.length,
-    totalBinaries: results.length,
+    totalExecutables: results.length,
+    totalBinaries: totalBinaries,
+    totalScripts: totalScripts,
     directoriesScanned: scannedDirs,
     filesChecked: scannedFiles,
     packages: sortedPackages
@@ -562,15 +604,15 @@ function printHelp() {
 NPM Binary Scanner
 ==================
 
-Scans npm packages (node_modules) for binary executables and optionally
-uploads them to UnknownCyber API.
+Scans npm packages (node_modules) for binary executables and executable scripts,
+then optionally uploads them to UnknownCyber API for security analysis.
 
 Usage:
   node scanner.js [options] [path]
 
 Options:
   --deep              Enable deep scan using magic bytes (slower but finds more)
-  --upload            Upload found binaries to UnknownCyber API
+  --upload            Upload found executables to UnknownCyber API
   --api-url <url>     API base URL (or set UC_API_URL env var)
   --api-key <key>     API key for authentication (or set UC_API_KEY env var)
   --help, -h          Show this help message
@@ -601,13 +643,18 @@ Detected Binary Types:
   - WebAssembly: WASM
   - Other: BIN, DAT
 
+Detected Script Types (potential attack vectors):
+  - Windows: BAT, CMD, PS1, VBS, VBE, WSF, WSH
+  - Unix: SH, BASH, ZSH, CSH, KSH
+  - Cross-platform: PL (Perl), RB (Ruby), PY/PYW (Python)
+
 Upload Details:
-  When --upload is specified, each binary is uploaded with:
+  When --upload is specified, each executable is uploaded with:
   - Filename: Path relative to node_modules (e.g., "@esbuild/win32-x64/esbuild.exe")
   - Tag: "SW_<package>@<version>" format (e.g., "SW_@esbuild/win32-x64@0.20.2")
 
 Output:
-  - Console output grouped by package
+  - Console output grouped by package (⚙️ for binaries, 📜 for scripts)
   - JSON file (binary-scan-results.json) with detailed results and upload status
 `);
 }
