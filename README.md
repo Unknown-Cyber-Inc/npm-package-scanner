@@ -69,6 +69,7 @@ node scanner.js --upload --api-key YOUR_API_KEY
 | `upload` | Upload binaries to UnknownCyber | No | `false` |
 | `api-url` | UnknownCyber API URL | No | `https://api.unknowncyber.com` |
 | `api-key` | UnknownCyber API key | No | `''` |
+| `repo` | Repository name to tag uploads with | No | `${{ github.repository }}` |
 
 ### Outputs
 
@@ -180,14 +181,27 @@ node scanner.js --upload
 | WebAssembly | `.wasm` |
 | General | `.bin`, `.dat` |
 
+## Detected Script Types
+
+Executable scripts are also detected as potential attack vectors:
+
+| Platform | Extensions |
+|----------|------------|
+| Windows | `.bat`, `.cmd`, `.ps1`, `.vbs`, `.vbe`, `.wsf`, `.wsh` |
+| Unix/Linux | `.sh`, `.bash`, `.zsh`, `.csh`, `.ksh` |
+| Cross-platform | `.pl` (Perl), `.rb` (Ruby), `.py`, `.pyw` (Python) |
+
 ## Upload Details
 
-When uploading to UnknownCyber, each binary is tagged with:
+When uploading to UnknownCyber, each executable is tagged with:
 
 | Field | Format | Example |
 |-------|--------|---------|
 | **Filename** | Path below `node_modules` | `@esbuild/win32-x64/esbuild.exe` |
-| **Tag** | `SW_<package>@<version>` | `SW_@esbuild/win32-x64@0.20.2` |
+| **Package Tag** | `SW_<package>@<version>` | `SW_@esbuild/win32-x64@0.20.2` |
+| **Repo Tag** | `REPO_<owner>/<repo>` | `REPO_my-org/my-app` |
+
+The repository tag helps identify which project the binary came from, useful when the same package version appears in multiple repositories.
 
 ## Setting Up the API Key
 

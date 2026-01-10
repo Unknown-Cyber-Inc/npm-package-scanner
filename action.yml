@@ -27,6 +27,10 @@ inputs:
     description: 'UnknownCyber API key for authentication'
     required: false
     default: ''
+  repo:
+    description: 'Repository name to tag uploads with (defaults to current GitHub repository)'
+    required: false
+    default: '${{ github.repository }}'
 
 outputs:
   total-packages:
@@ -57,6 +61,7 @@ runs:
         UPLOAD: ${{ inputs.upload }}
         UC_API_URL: ${{ inputs.api-url }}
         UC_API_KEY: ${{ inputs.api-key }}
+        UC_REPO: ${{ inputs.repo }}
       run: |
         # Build command arguments
         ARGS=""
@@ -65,6 +70,9 @@ runs:
         fi
         if [ "$UPLOAD" = "true" ]; then
           ARGS="$ARGS --upload"
+        fi
+        if [ -n "$UC_REPO" ]; then
+          ARGS="$ARGS --repo $UC_REPO"
         fi
         
         # Run the scanner

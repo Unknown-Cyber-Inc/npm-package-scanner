@@ -27,6 +27,7 @@ jobs:
         id: scan
         with:
           scan-path: 'test-project'
+          deep-scan: 'true'
 
       - name: Check results
         run: |
@@ -55,6 +56,7 @@ jobs:
         id: scan
         with:
           scan-path: 'test-project'
+          deep-scan: 'true'
           upload: 'true'
           api-key: ${{ secrets.UC_API_KEY }}
 
