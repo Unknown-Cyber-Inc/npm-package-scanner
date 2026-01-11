@@ -241,3 +241,83 @@ jobs:
           UC_API_URL: https://api.unknowncyber.com
         run: |
           node scanner.js --upload --no-reputations test-project
+
+  test-yara-scan:
+    name: Test YARA Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install esbuild --save-dev
+
+      - name: Run Scanner with YARA
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          deep-scan: 'true'
+          yara-scan: 'true'
+
+      - name: Check YARA results
+        run: |
+          echo "=== Scan Results ==="
+          echo "Total binaries: ${{ steps.scan.outputs.total-binaries }}"
+          echo ""
+          echo "=== YARA Results ==="
+          echo "Files with YARA matches: ${{ steps.scan.outputs.yara-matches }}"
+          echo "High severity matches: ${{ steps.scan.outputs.yara-high-severity }}"
+          
+          if [ -f "test-project/yara-results.json" ]; then
+            echo ""
+            echo "=== YARA Results JSON ==="
+            cat test-project/yara-results.json
+          fi
+
+  test-yara-cli:
+    name: Test YARA CLI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install yara-python
+        run: pip install yara-python>=4.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install esbuild --save-dev
+
+      - name: Run binary scanner
+        run: node scanner.js --deep test-project
+
+      - name: Test YARA scanner help
+        run: python yara_scanner.py --help
+
+      - name: Test YARA scanner with results
+        run: |
+          python yara_scanner.py \
+            --input test-project/binary-scan-results.json \
+            --output test-project/yara-results.json \
+            --github-annotations
+
+      - name: Show YARA results
+        run: cat test-project/yara-results.json

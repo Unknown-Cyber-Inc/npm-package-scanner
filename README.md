@@ -30,6 +30,7 @@ This tool helps you:
 - ☁️ **UnknownCyber Integration**: Upload binaries for malware analysis
 - 🔒 **Smart Deduplication**: Skips files already in UnknownCyber to save time and bandwidth
 - ⚠️ **Threat Detection**: Fetches and displays reputation data for existing files
+- 🧬 **YARA Scanning**: Local pattern matching for malware, crypto miners, and suspicious code
 - 📊 **Detailed Reports**: JSON output with full scan results and threat assessments
 - 🚀 **GitHub Action**: Easy CI/CD integration
 
@@ -92,6 +93,8 @@ node scanner.js --upload --api-key YOUR_API_KEY
 | `api-url` | UnknownCyber API URL | No | `https://api.unknowncyber.com` |
 | `api-key` | UnknownCyber API key | No | `''` |
 | `repo` | Repository name to tag uploads with | No | `${{ github.repository }}` |
+| `yara-scan` | Enable YARA scanning of binaries | No | `false` |
+| `yara-rules` | Path to additional YARA rules | No | `''` |
 
 ### Outputs
 
@@ -104,6 +107,8 @@ node scanner.js --upload --api-key YOUR_API_KEY
 | `upload-failed` | Number of failed uploads |
 | `upload-skipped` | Number of files skipped (already exist in UC) |
 | `threats-found` | Number of files with HIGH or MEDIUM threat level |
+| `yara-matches` | Number of files with YARA rule matches |
+| `yara-high-severity` | Number of high/critical severity YARA matches |
 
 ### Examples
 
@@ -366,6 +371,83 @@ When files already exist in UnknownCyber, the scanner automatically syncs tags:
 - Adds missing `SW_<package>_<version>` and `REPO_<repo>` tags
 - Ensures consistent tagging across repositories
 
+## YARA Scanning
+
+The scanner includes optional YARA scanning to detect malware patterns, suspicious behaviors, and crypto miners in binaries.
+
+### Enable YARA Scanning
+
+```yaml
+- name: Scan with YARA
+  uses: Unknown-Cyber-Inc/npm-binary-scanner@v1
+  with:
+    yara-scan: 'true'
+```
+
+### Add Custom Rules
+
+```yaml
+- name: Scan with custom YARA rules
+  uses: Unknown-Cyber-Inc/npm-binary-scanner@v1
+  with:
+    yara-scan: 'true'
+    yara-rules: './my-rules'  # Path to your .yar files
+```
+
+### Bundled Rules
+
+The scanner includes these YARA rule categories:
+
+| Rule File | Description |
+|-----------|-------------|
+| `malware.yar` | Generic malware signatures, backdoors, ransomware, stealers |
+| `suspicious.yar` | Suspicious patterns: PowerShell cradles, process injection, anti-debug |
+| `crypto.yar` | Cryptocurrency miners, wallet addresses, mining pool connections |
+| `shai_hulud.yar` | Obfuscated JavaScript patterns (npm supply chain attacks) |
+
+### YARA CLI Usage
+
+```bash
+# Scan using binary-scan-results.json
+python yara_scanner.py --input results.json
+
+# Scan a directory directly  
+python yara_scanner.py --dir ./node_modules
+
+# Use only custom rules (skip bundled)
+python yara_scanner.py --input results.json --rules ./my-rules --no-bundled-rules
+
+# Output to file with GitHub annotations
+python yara_scanner.py --input results.json --output yara.json --github-annotations
+```
+
+### YARA Results
+
+YARA matches are reported with severity levels from rule metadata:
+
+| Severity | Description | Annotation |
+|----------|-------------|------------|
+| **critical** | Known malware, active threats | 🔴 `::error::` |
+| **high** | Strong indicators of malicious behavior | 🔴 `::error::` |
+| **medium** | Suspicious patterns worth investigating | 🟡 `::warning::` |
+| **low** | Minor concerns, informational | 🔵 `::notice::` |
+
+### Fail on YARA Matches
+
+```yaml
+- name: Scan with YARA
+  uses: Unknown-Cyber-Inc/npm-binary-scanner@v1
+  id: scan
+  with:
+    yara-scan: 'true'
+
+- name: Fail if malware detected
+  if: steps.scan.outputs.yara-high-severity > 0
+  run: |
+    echo "::error::YARA detected ${{ steps.scan.outputs.yara-high-severity }} high-severity matches!"
+    exit 1
+```
+
 ## Detected Binary Types
 
 | Platform | Extensions/Types |
@@ -458,7 +540,8 @@ Many popular npm packages include native binaries:
 
 - Node.js 18+ (for GitHub Action)
 - Node.js 12+ (for CLI)
-- No external dependencies
+- Python 3.8+ with `yara-python` (for YARA scanning, optional)
+- No other external dependencies
 
 ## License
 

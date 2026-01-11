@@ -39,6 +39,14 @@ inputs:
     description: 'Repository name to tag uploads with (defaults to current GitHub repository)'
     required: false
     default: '${{ github.repository }}'
+  yara-scan:
+    description: 'Enable YARA scanning of binaries'
+    required: false
+    default: 'false'
+  yara-rules:
+    description: 'Path to additional YARA rules file or directory'
+    required: false
+    default: ''
 
 outputs:
   total-packages:
@@ -55,6 +63,10 @@ outputs:
     description: 'Number of files skipped (already exist in UC)'
   threats-found:
     description: 'Number of files with HIGH or MEDIUM threat level'
+  yara-matches:
+    description: 'Number of files with YARA rule matches'
+  yara-high-severity:
+    description: 'Number of files with high/critical severity YARA matches'
 
 runs:
   using: 'composite'
@@ -119,12 +131,58 @@ runs:
           echo "threats-found=$THREATS_FOUND" >> $GITHUB_OUTPUT
         fi
 
+    - name: Setup Python for YARA
+      if: inputs.yara-scan == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install YARA Python
+      if: inputs.yara-scan == 'true'
+      shell: bash
+      run: pip install yara-python>=4.3.0
+
+    - name: Run YARA Scanner
+      id: yara
+      if: inputs.yara-scan == 'true'
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.scan-path }}
+        YARA_RULES: ${{ inputs.yara-rules }}
+      run: |
+        # Build YARA command arguments
+        YARA_ARGS="--input $SCAN_PATH/binary-scan-results.json"
+        YARA_ARGS="$YARA_ARGS --output $SCAN_PATH/yara-results.json"
+        YARA_ARGS="$YARA_ARGS --github-annotations"
+        
+        # Add user-provided rules if specified
+        if [ -n "$YARA_RULES" ]; then
+          YARA_ARGS="$YARA_ARGS --rules $YARA_RULES"
+        fi
+        
+        # Run YARA scanner
+        python "${{ github.action_path }}/yara_scanner.py" $YARA_ARGS
+        
+        # Parse YARA results
+        if [ -f "$SCAN_PATH/yara-results.json" ]; then
+          YARA_MATCHES=$(node -e "console.log(require('./$SCAN_PATH/yara-results.json').filesWithMatches || 0)")
+          YARA_HIGH=$(node -e "const r = require('./$SCAN_PATH/yara-results.json'); const matches = r.results || []; let count = 0; matches.forEach(m => m.matches.forEach(x => { if(['critical','high'].includes(x.meta?.severity)) count++; })); console.log(count)")
+          
+          echo "yara-matches=$YARA_MATCHES" >> $GITHUB_OUTPUT
+          echo "yara-high-severity=$YARA_HIGH" >> $GITHUB_OUTPUT
+        else
+          echo "yara-matches=0" >> $GITHUB_OUTPUT
+          echo "yara-high-severity=0" >> $GITHUB_OUTPUT
+        fi
+
     - name: Upload Results Artifact
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: binary-scan-results
-        path: ${{ inputs.scan-path }}/binary-scan-results.json
+        path: |
+          ${{ inputs.scan-path }}/binary-scan-results.json
+          ${{ inputs.scan-path }}/yara-results.json
         retention-days: 30
         overwrite: true
 

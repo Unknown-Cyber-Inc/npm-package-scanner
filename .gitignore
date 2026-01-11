@@ -20,3 +20,9 @@ test-project/
 test-reputation.js
 test-upload.js
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+yara-results.json
+
