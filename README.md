@@ -342,6 +342,43 @@ Digital signature validity for Windows PE files:
 | Valid signature | NONE | Verified publisher identity |
 | Unknown | UNKNOWN | Signature data unavailable |
 
+### 4. YARA Pattern Matching
+Local scanning using YARA rules to detect malware patterns:
+
+| Severity (from rule metadata) | Level | Interpretation |
+|------------------------------|-------|----------------|
+| `critical` | HIGH | Known malware signatures, active threats |
+| `high` | HIGH | Strong indicators of malicious behavior |
+| `medium` | MEDIUM | Suspicious patterns worth investigating |
+| `low` | LOW | Minor concerns, informational |
+
+YARA results are reported via:
+- `yara-matches` output: Total files with any YARA match
+- `yara-high-severity` output: Files matching critical/high severity rules
+
+#### Block Pipeline on YARA Matches
+
+```yaml
+- name: Scan with YARA
+  uses: Unknown-Cyber-Inc/npm-binary-scanner@v1
+  id: scan
+  with:
+    yara-scan: 'true'
+    yara-include: '*.js'
+
+- name: Fail on high-severity YARA matches
+  if: steps.scan.outputs.yara-high-severity > 0
+  run: |
+    echo "::error::YARA detected ${{ steps.scan.outputs.yara-high-severity }} high-severity matches!"
+    exit 1
+
+- name: Fail on any YARA match
+  if: steps.scan.outputs.yara-matches > 0
+  run: |
+    echo "::error::YARA detected matches in ${{ steps.scan.outputs.yara-matches }} files!"
+    exit 1
+```
+
 ## GitHub Actions Annotations
 
 When running as a GitHub Action, the scanner automatically emits annotations based on threat analysis:
