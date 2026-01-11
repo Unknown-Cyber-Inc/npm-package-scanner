@@ -358,3 +358,177 @@ jobs:
 
       - name: Show YARA results
         run: cat test-project/yara-results.json
+
+  test-include-package-json:
+    name: Test Include package.json
+    runs-on: ubuntu-latest
+    needs: test-scan-only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install esbuild lodash@4.17.20 --save-dev
+
+      - name: Run Scanner with package.json
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          deep-scan: 'true'
+          include-package-json: 'true'
+
+      - name: Check results
+        run: |
+          echo "=== Scan Results ==="
+          echo "Total packages: ${{ steps.scan.outputs.total-packages }}"
+          echo "Total binaries: ${{ steps.scan.outputs.total-binaries }}"
+          
+          echo ""
+          echo "=== Checking for package.json files ==="
+          METADATA_COUNT=$(node -e "const r = require('./test-project/binary-scan-results.json'); console.log(r.totalMetadata || 0)")
+          echo "Metadata files (package.json): $METADATA_COUNT"
+          
+          if [ "$METADATA_COUNT" -eq "0" ]; then
+            echo "::error::Expected package.json files to be included"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== Full JSON Results ==="
+          cat test-project/binary-scan-results.json
+
+  test-include-all-files:
+    name: Test Include All Files
+    runs-on: ubuntu-latest
+    needs: test-include-package-json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install lodash@4.17.20 --save  # Has JS files to scan
+
+      - name: Run Scanner with all files
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          include-all-files: 'true'
+
+      - name: Check results
+        run: |
+          echo "=== Scan Results ==="
+          echo "Total packages: ${{ steps.scan.outputs.total-packages }}"
+          
+          TOTAL_FILES=$(node -e "const r = require('./test-project/binary-scan-results.json'); console.log(r.totalFiles || 0)")
+          TOTAL_OTHER=$(node -e "const r = require('./test-project/binary-scan-results.json'); console.log(r.totalOther || 0)")
+          TOTAL_METADATA=$(node -e "const r = require('./test-project/binary-scan-results.json'); console.log(r.totalMetadata || 0)")
+          
+          echo "Total files: $TOTAL_FILES"
+          echo "Other files (JS, etc): $TOTAL_OTHER"
+          echo "Metadata files: $TOTAL_METADATA"
+          
+          if [ "$TOTAL_OTHER" -eq "0" ]; then
+            echo "::error::Expected 'other' files (JS, MD, etc) to be included"
+            exit 1
+          fi
+
+  test-vulnerable-package:
+    name: Test Package with Known CVEs
+    runs-on: ubuntu-latest
+    needs: test-scan-only
+    # Only run on push (uses API key)
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test project with vulnerable package
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          # lodash 4.17.20 has known CVEs:
+          # - CVE-2021-23337 (command injection)
+          # - CVE-2020-28500 (prototype pollution)
+          npm install lodash@4.17.20 --save
+          # minimist 1.2.5 has CVE-2021-44906 (prototype pollution)
+          npm install minimist@1.2.5 --save
+
+      - name: Run Scanner with upload and package.json
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          upload: 'true'
+          include-package-json: 'true'
+          api-key: ${{ secrets.UC_API_KEY }}
+
+      - name: Show results
+        run: |
+          echo "=== Vulnerable Package Test ==="
+          echo "Packages scanned: ${{ steps.scan.outputs.total-packages }}"
+          echo "Files uploaded: ${{ steps.scan.outputs.upload-successful }}"
+          echo "Files skipped: ${{ steps.scan.outputs.upload-skipped }}"
+          
+          echo ""
+          echo "=== Packages with Known CVEs ==="
+          echo "- lodash@4.17.20: CVE-2021-23337, CVE-2020-28500"
+          echo "- minimist@1.2.5: CVE-2021-44906"
+          
+          echo ""
+          echo "=== Results JSON ==="
+          cat test-project/binary-scan-results.json
+
+  test-cli-file-options:
+    name: Test CLI File Options
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install lodash@4.17.20 --save
+
+      - name: Test CLI --include-package-json
+        run: |
+          node scanner.js --include-package-json test-project
+          METADATA=$(node -e "const r = require('./test-project/binary-scan-results.json'); console.log(r.totalMetadata || 0)")
+          echo "Metadata files: $METADATA"
+          if [ "$METADATA" -eq "0" ]; then
+            echo "::error::--include-package-json did not find any package.json files"
+            exit 1
+          fi
+
+      - name: Test CLI --all-files
+        run: |
+          node scanner.js --all-files test-project
+          OTHER=$(node -e "const r = require('./test-project/binary-scan-results.json'); console.log(r.totalOther || 0)")
+          echo "Other files: $OTHER"
+          if [ "$OTHER" -eq "0" ]; then
+            echo "::error::--all-files did not find any other files"
+            exit 1
+          fi
+
+      - name: Show JSON structure
+        run: |
+          echo "=== JSON Output Structure ==="
+          node -e "const r = require('./test-project/binary-scan-results.json'); console.log(JSON.stringify({totalFiles: r.totalFiles, totalBinaries: r.totalBinaries, totalScripts: r.totalScripts, totalMetadata: r.totalMetadata, totalOther: r.totalOther, includePackageJson: r.includePackageJson, includeAllFiles: r.includeAllFiles}, null, 2))"
