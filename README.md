@@ -322,8 +322,8 @@ Code similarity to known malware families using UnknownCyber's genomic analysis:
 | Condition | Level | Interpretation |
 |-----------|-------|----------------|
 | Exact clone of known malware (100% match) | HIGH | Binary is identical to known threat |
-| Similar to detected threats (<100% match) | MEDIUM | Shares code with malicious families |
-| Has matches, none flagged | LOW | Similar files exist but are benign |
+| Similar to known threats (<100% match) | MEDIUM | Shares code with malicious families |
+| Similar files exist, none malicious | LOW | Matches found but no known threats |
 | No similar files found | NONE | Unique or not in database |
 
 ### 3. Code Signing
