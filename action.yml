@@ -19,6 +19,14 @@ inputs:
     description: 'Upload found binaries to UnknownCyber API'
     required: false
     default: 'false'
+  skip-existing:
+    description: 'Skip uploading files that already exist in UnknownCyber (default: true)'
+    required: false
+    default: 'true'
+  get-reputations:
+    description: 'Fetch reputation data for existing files (default: true)'
+    required: false
+    default: 'true'
   api-url:
     description: 'UnknownCyber API URL'
     required: false
@@ -43,6 +51,10 @@ outputs:
     description: 'Number of successfully uploaded files'
   upload-failed:
     description: 'Number of failed uploads'
+  upload-skipped:
+    description: 'Number of files skipped (already exist in UC)'
+  threats-found:
+    description: 'Number of files with HIGH or MEDIUM threat level'
 
 runs:
   using: 'composite'
@@ -59,6 +71,8 @@ runs:
         SCAN_PATH: ${{ inputs.scan-path }}
         DEEP_SCAN: ${{ inputs.deep-scan }}
         UPLOAD: ${{ inputs.upload }}
+        SKIP_EXISTING: ${{ inputs.skip-existing }}
+        GET_REPUTATIONS: ${{ inputs.get-reputations }}
         UC_API_URL: ${{ inputs.api-url }}
         UC_API_KEY: ${{ inputs.api-key }}
         UC_REPO: ${{ inputs.repo }}
@@ -70,6 +84,12 @@ runs:
         fi
         if [ "$UPLOAD" = "true" ]; then
           ARGS="$ARGS --upload"
+        fi
+        if [ "$SKIP_EXISTING" = "false" ]; then
+          ARGS="$ARGS --force-upload"
+        fi
+        if [ "$GET_REPUTATIONS" = "false" ]; then
+          ARGS="$ARGS --no-reputations"
         fi
         if [ -n "$UC_REPO" ]; then
           ARGS="$ARGS --repo $UC_REPO"
@@ -90,9 +110,13 @@ runs:
           # Check for upload results
           UPLOAD_SUCCESS=$(node -e "const r = require('./$SCAN_PATH/binary-scan-results.json'); console.log(r.uploadResults?.successful?.length || 0)")
           UPLOAD_FAILED=$(node -e "const r = require('./$SCAN_PATH/binary-scan-results.json'); console.log(r.uploadResults?.failed?.length || 0)")
+          UPLOAD_SKIPPED=$(node -e "const r = require('./$SCAN_PATH/binary-scan-results.json'); console.log(r.uploadResults?.skipped?.length || 0)")
+          THREATS_FOUND=$(node -e "const r = require('./$SCAN_PATH/binary-scan-results.json'); const reps = r.uploadResults?.reputations || []; console.log(reps.filter(x => x.reputation && ['high','medium'].includes(x.reputation.overallThreatLevel)).length)")
           
           echo "upload-successful=$UPLOAD_SUCCESS" >> $GITHUB_OUTPUT
           echo "upload-failed=$UPLOAD_FAILED" >> $GITHUB_OUTPUT
+          echo "upload-skipped=$UPLOAD_SKIPPED" >> $GITHUB_OUTPUT
+          echo "threats-found=$THREATS_FOUND" >> $GITHUB_OUTPUT
         fi
 
     - name: Upload Results Artifact

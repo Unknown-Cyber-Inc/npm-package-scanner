@@ -17,4 +17,6 @@ Thumbs.db
 
 # Test artifacts
 test-project/
+test-reputation.js
+test-upload.js
 

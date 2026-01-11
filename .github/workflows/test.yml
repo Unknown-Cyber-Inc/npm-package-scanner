@@ -3,9 +3,9 @@ name: Test Action
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test-scan-only:
@@ -36,11 +36,11 @@ jobs:
           cat test-project/binary-scan-results.json
 
   test-with-upload:
-    name: Test With Upload
+    name: Test With Upload (Smart Deduplication)
     runs-on: ubuntu-latest
     needs: test-scan-only
-    # Only run upload test if API key is available
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Only run upload test on push (API key is available from secrets)
+    if: ${{ github.event_name == 'push' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
           npm init -y
           npm install esbuild --save-dev
 
-      - name: Run Binary Scanner (with upload)
+      - name: Run Binary Scanner (with upload - smart deduplication)
         uses: ./
         id: scan
         with:
@@ -63,8 +63,181 @@ jobs:
 
       - name: Check results
         run: |
+          echo "=== Scan Results ==="
           echo "Total packages with binaries: ${{ steps.scan.outputs.total-packages }}"
           echo "Total binary files: ${{ steps.scan.outputs.total-binaries }}"
+          echo ""
+          echo "=== Upload Results ==="
           echo "Uploaded successfully: ${{ steps.scan.outputs.upload-successful }}"
           echo "Upload failures: ${{ steps.scan.outputs.upload-failed }}"
+          echo "Skipped (already exist): ${{ steps.scan.outputs.upload-skipped }}"
+          echo ""
+          echo "=== Threat Assessment ==="
+          echo "Threats found (HIGH/MEDIUM): ${{ steps.scan.outputs.threats-found }}"
 
+      - name: Add to job summary
+        run: |
+          echo "## Binary Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Packages with binaries | ${{ steps.scan.outputs.total-packages }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total binary files | ${{ steps.scan.outputs.total-binaries }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Uploaded | ${{ steps.scan.outputs.upload-successful }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skipped (existing) | ${{ steps.scan.outputs.upload-skipped }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | ${{ steps.scan.outputs.upload-failed }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚠️ Threats (HIGH/MEDIUM) | ${{ steps.scan.outputs.threats-found }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Show detailed results
+        run: |
+          echo "=== Detailed JSON Results ==="
+          cat test-project/binary-scan-results.json | head -100
+
+  test-force-upload:
+    name: Test Force Upload (No Deduplication)
+    runs-on: ubuntu-latest
+    needs: test-with-upload
+    # Run only on pushes (API key available from secrets)
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test project with small package
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          # Use a smaller package for force upload test
+          npm install @esbuild/linux-x64 --save-dev --ignore-scripts || true
+
+      - name: Run Binary Scanner (force upload)
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          upload: 'true'
+          skip-existing: 'false'
+          api-key: ${{ secrets.UC_API_KEY }}
+
+      - name: Check force upload results
+        run: |
+          echo "=== Force Upload Results ==="
+          echo "Uploaded: ${{ steps.scan.outputs.upload-successful }}"
+          echo "Failed: ${{ steps.scan.outputs.upload-failed }}"
+          echo "Skipped: ${{ steps.scan.outputs.upload-skipped }}"
+          # With force upload, skipped should be 0
+          if [ "${{ steps.scan.outputs.upload-skipped }}" != "0" ]; then
+            echo "Warning: Expected 0 skipped files with force upload"
+          fi
+
+  test-no-reputations:
+    name: Test Fast Mode (No Reputation Checks)
+    runs-on: ubuntu-latest
+    needs: test-scan-only
+    # Run only on pushes (API key available from secrets)
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install esbuild --save-dev
+
+      - name: Run Binary Scanner (no reputation checks)
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          upload: 'true'
+          get-reputations: 'false'
+          api-key: ${{ secrets.UC_API_KEY }}
+
+      - name: Check results
+        run: |
+          echo "=== Fast Mode Results ==="
+          echo "Uploaded: ${{ steps.scan.outputs.upload-successful }}"
+          echo "Skipped: ${{ steps.scan.outputs.upload-skipped }}"
+          echo "Threats found: ${{ steps.scan.outputs.threats-found }}"
+          # With no reputation checks, threats-found should be 0
+          if [ "${{ steps.scan.outputs.threats-found }}" != "0" ]; then
+            echo "Warning: Expected 0 threats with reputation checks disabled"
+          fi
+
+  test-cli:
+    name: Test CLI Direct Usage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install esbuild --save-dev
+
+      - name: Test CLI scan
+        run: |
+          node scanner.js test-project
+          cat test-project/binary-scan-results.json
+
+      - name: Test CLI deep scan
+        run: |
+          node scanner.js --deep test-project
+
+      - name: Test CLI help
+        run: |
+          node scanner.js --help
+
+  test-cli-with-upload:
+    name: Test CLI With Upload
+    runs-on: ubuntu-latest
+    needs: test-cli
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create test project
+        run: |
+          mkdir -p test-project
+          cd test-project
+          npm init -y
+          npm install @esbuild/linux-x64 --save-dev --ignore-scripts || true
+
+      - name: Test CLI upload with deduplication
+        env:
+          UC_API_KEY: ${{ secrets.UC_API_KEY }}
+          UC_API_URL: https://api.unknowncyber.com
+        run: |
+          node scanner.js --upload test-project
+
+      - name: Test CLI force upload
+        env:
+          UC_API_KEY: ${{ secrets.UC_API_KEY }}
+          UC_API_URL: https://api.unknowncyber.com
+        run: |
+          node scanner.js --upload --force-upload test-project
+
+      - name: Test CLI no reputations
+        env:
+          UC_API_KEY: ${{ secrets.UC_API_KEY }}
+          UC_API_URL: https://api.unknowncyber.com
+        run: |
+          node scanner.js --upload --no-reputations test-project

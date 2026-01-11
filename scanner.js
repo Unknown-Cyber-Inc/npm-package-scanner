@@ -9,9 +9,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
+
+// File reputation module for checking existing files
+const { createReputationClient, checkFileExistence, getFileReputations, getFileTags, addFileTags } = require('./file-reputation');
 
 // Binary file extensions to look for
 const BINARY_EXTENSIONS = new Set([
@@ -79,6 +83,48 @@ const SKIP_PATTERNS = [
 let deepMagicScan = false;
 let scannedDirs = 0;
 let scannedFiles = 0;
+
+/**
+ * Compute SHA256 hash of a file
+ * @param {string} filePath - Path to file
+ * @returns {Promise<string>} - SHA256 hash in lowercase hex
+ */
+function computeFileHash(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    
+    stream.on('data', data => hash.update(data));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+/**
+ * Compute hashes for all binary files
+ * @param {object[]} results - Array of scan results
+ * @returns {Promise<object[]>} - Results with sha256 property added
+ */
+async function computeHashes(results) {
+  console.log('\nComputing file hashes...');
+  
+  for (let i = 0; i < results.length; i++) {
+    const binary = results[i];
+    process.stdout.write(`\rHashing [${i + 1}/${results.length}]: ${binary.file.substring(0, 50)}...`);
+    
+    try {
+      binary.sha256 = await computeFileHash(binary.absolutePath);
+    } catch (err) {
+      console.log(`\n  Warning: Could not hash ${binary.file}: ${err.message}`);
+      binary.sha256 = null;
+    }
+  }
+  
+  process.stdout.write('\r' + ' '.repeat(80) + '\r');
+  console.log(`Computed hashes for ${results.filter(r => r.sha256).length} files`);
+  
+  return results;
+}
 
 /**
  * Check if a file is a binary by reading its magic bytes
@@ -354,9 +400,248 @@ function uploadFile(apiUrl, apiKey, filePath, filename, tag) {
 }
 
 /**
+ * Check which files already exist in UnknownCyber
+ * @param {object[]} results - Array of scan results with sha256 hashes
+ * @param {string} apiUrl - API base URL
+ * @param {string} apiKey - API key
+ * @returns {Promise<{toUpload: object[], existing: object[]}>}
+ */
+async function checkExistingFiles(results, apiUrl, apiKey) {
+  console.log('\n' + '='.repeat(80));
+  console.log('CHECKING EXISTING FILES IN UNKNOWNCYBER');
+  console.log('='.repeat(80));
+  
+  // Filter results that have valid hashes
+  const hashableResults = results.filter(r => r.sha256);
+  console.log(`\nChecking ${hashableResults.length} files with valid hashes...`);
+  
+  if (hashableResults.length === 0) {
+    return { toUpload: results, existing: [] };
+  }
+  
+  try {
+    const client = createReputationClient({ apiUrl, apiKey });
+    const hashes = hashableResults.map(r => r.sha256);
+    
+    // Check existence in batches
+    const { existing: existingHashes, notFound: notFoundHashes } = await checkFileExistence(client, hashes, {
+      concurrency: 10
+    });
+    
+    const existingSet = new Set(existingHashes);
+    const existing = hashableResults.filter(r => existingSet.has(r.sha256));
+    const toUpload = results.filter(r => !r.sha256 || !existingSet.has(r.sha256));
+    
+    console.log(`\n  Already in UC: ${existing.length} files`);
+    console.log(`  New files to upload: ${toUpload.length} files`);
+    
+    if (existing.length > 0) {
+      console.log('\n  Existing files (will skip):');
+      for (const file of existing.slice(0, 10)) {
+        console.log(`    - ${file.file} (${file.sha256.substring(0, 12)}...)`);
+      }
+      if (existing.length > 10) {
+        console.log(`    ... and ${existing.length - 10} more`);
+      }
+    }
+    
+    return { toUpload, existing };
+  } catch (err) {
+    console.log(`\n  Warning: Could not check existing files: ${err.message}`);
+    console.log('  Will attempt to upload all files...');
+    return { toUpload: results, existing: [] };
+  }
+}
+
+/**
+ * Get reputation data for existing files
+ * @param {object[]} existingFiles - Files that exist in UC
+ * @param {string} apiUrl - API base URL
+ * @param {string} apiKey - API key
+ * @returns {Promise<object[]>}
+ */
+async function getReputationsForExisting(existingFiles, apiUrl, apiKey) {
+  if (existingFiles.length === 0) return [];
+  
+  console.log('\n' + '-'.repeat(60));
+  console.log('Getting reputation data for existing files...');
+  
+  try {
+    const client = createReputationClient({ apiUrl, apiKey });
+    const reputations = [];
+    
+    for (let i = 0; i < existingFiles.length; i++) {
+      const file = existingFiles[i];
+      process.stdout.write(`\r  [${i + 1}/${existingFiles.length}] Checking ${file.file.substring(0, 40)}...`);
+      
+      try {
+        const rep = await getFileReputations(client, file.sha256);
+        reputations.push({
+          file: file.file,
+          sha256: file.sha256,
+          package: file.package,
+          version: file.version,
+          reputation: rep
+        });
+      } catch (err) {
+        reputations.push({
+          file: file.file,
+          sha256: file.sha256,
+          package: file.package,
+          version: file.version,
+          error: err.message
+        });
+      }
+    }
+    
+    process.stdout.write('\r' + ' '.repeat(80) + '\r');
+    
+    // Summary of reputations
+    const byThreat = { high: 0, medium: 0, caution: 0, low: 0, none: 0, unknown: 0 };
+    for (const rep of reputations) {
+      if (rep.reputation) {
+        byThreat[rep.reputation.overallThreatLevel] = (byThreat[rep.reputation.overallThreatLevel] || 0) + 1;
+      }
+    }
+    
+    console.log('  Reputation summary for existing files:');
+    if (byThreat.high > 0) console.log(`    \x1b[31m⚠ HIGH: ${byThreat.high}\x1b[0m`);
+    if (byThreat.medium > 0) console.log(`    \x1b[33m⚠ MEDIUM: ${byThreat.medium}\x1b[0m`);
+    if (byThreat.caution > 0) console.log(`    \x1b[33m! CAUTION: ${byThreat.caution}\x1b[0m`);
+    if (byThreat.low > 0) console.log(`    \x1b[32m✓ LOW: ${byThreat.low}\x1b[0m`);
+    if (byThreat.none > 0) console.log(`    \x1b[32m✓ NONE: ${byThreat.none}\x1b[0m`);
+    if (byThreat.unknown > 0) console.log(`    ? UNKNOWN: ${byThreat.unknown}`);
+    
+    return reputations;
+  } catch (err) {
+    console.log(`\n  Warning: Could not get reputations: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Sync tags for existing files - add missing tags
+ * @param {object[]} existingFiles - Files that exist in UC
+ * @param {string} apiUrl - API base URL
+ * @param {string} apiKey - API key
+ * @param {string} repo - Repository name (optional)
+ * @returns {Promise<object>} - { synced: [], alreadyTagged: [], failed: [] }
+ */
+async function syncTagsForExisting(existingFiles, apiUrl, apiKey, repo) {
+  if (existingFiles.length === 0) return { synced: [], alreadyTagged: [], failed: [] };
+  
+  console.log('\n' + '-'.repeat(60));
+  console.log('Syncing tags for existing files...');
+  
+  const results = { synced: [], alreadyTagged: [], failed: [] };
+  
+  try {
+    const client = createReputationClient({ apiUrl, apiKey });
+    
+    for (let i = 0; i < existingFiles.length; i++) {
+      const file = existingFiles[i];
+      process.stdout.write(`\r  [${i + 1}/${existingFiles.length}] Checking tags for ${file.file.substring(0, 40)}...`);
+      
+      // Build expected tags
+      const expectedTags = [];
+      expectedTags.push(`SW_${file.package}@${file.version}`.replace(/\s+/g, '_'));
+      if (repo) {
+        expectedTags.push(`REPO_${repo}`.replace(/\s+/g, '_'));
+      }
+      
+      try {
+        // Get current tags
+        const currentTags = await getFileTags(client, file.sha256);
+        const currentTagSet = new Set(currentTags);
+        
+        // Find missing tags
+        const missingTags = expectedTags.filter(t => !currentTagSet.has(t));
+        
+        if (missingTags.length === 0) {
+          results.alreadyTagged.push({
+            file: file.file,
+            sha256: file.sha256,
+            tags: expectedTags
+          });
+        } else {
+          // Add missing tags
+          const addResult = await addFileTags(client, file.sha256, missingTags);
+          
+          if (addResult.added.length > 0 || addResult.existing.length > 0) {
+            results.synced.push({
+              file: file.file,
+              sha256: file.sha256,
+              addedTags: addResult.added,
+              existingTags: addResult.existing
+            });
+          }
+          
+          if (addResult.failed.length > 0) {
+            results.failed.push({
+              file: file.file,
+              sha256: file.sha256,
+              failedTags: addResult.failed
+            });
+          }
+        }
+      } catch (err) {
+        results.failed.push({
+          file: file.file,
+          sha256: file.sha256,
+          error: err.message
+        });
+      }
+    }
+    
+    process.stdout.write('\r' + ' '.repeat(80) + '\r');
+    
+    // Summary
+    console.log('  Tag sync summary:');
+    console.log(`    Already tagged: ${results.alreadyTagged.length}`);
+    console.log(`    Tags added: ${results.synced.length}`);
+    if (results.failed.length > 0) {
+      console.log(`    \x1b[31mFailed: ${results.failed.length}\x1b[0m`);
+    }
+    
+    return results;
+  } catch (err) {
+    console.log(`\n  Warning: Could not sync tags: ${err.message}`);
+    return results;
+  }
+}
+
+/**
  * Upload all found binaries
  */
-async function uploadBinaries(results, apiUrl, apiKey, repo) {
+async function uploadBinaries(results, apiUrl, apiKey, repo, options = {}) {
+  const { skipExisting = true, getReputations = true } = options;
+  
+  // Compute hashes first
+  await computeHashes(results);
+  
+  let toUpload = results;
+  let existingFiles = [];
+  let existingReputations = [];
+  
+  // Check for existing files if enabled
+  let tagSyncResults = { synced: [], alreadyTagged: [], failed: [] };
+  
+  if (skipExisting) {
+    const checkResult = await checkExistingFiles(results, apiUrl, apiKey);
+    toUpload = checkResult.toUpload;
+    existingFiles = checkResult.existing;
+    
+    // Sync tags for existing files (add missing tags)
+    if (existingFiles.length > 0) {
+      tagSyncResults = await syncTagsForExisting(existingFiles, apiUrl, apiKey, repo);
+    }
+    
+    // Get reputations for existing files if enabled
+    if (getReputations && existingFiles.length > 0) {
+      existingReputations = await getReputationsForExisting(existingFiles, apiUrl, apiKey);
+    }
+  }
+  
   console.log('\n' + '='.repeat(80));
   console.log('UPLOADING EXECUTABLES TO UNKNOWNCYBER');
   console.log('='.repeat(80));
@@ -364,15 +649,27 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
   if (repo) {
     console.log(`Repository: ${repo}`);
   }
-  console.log(`Total files to upload: ${results.length}\n`);
+  console.log(`Total files to upload: ${toUpload.length} (${existingFiles.length} already exist)\n`);
   
   const uploadResults = {
     successful: [],
-    failed: []
+    failed: [],
+    skipped: existingFiles.map(f => ({
+      file: f.file,
+      sha256: f.sha256,
+      reason: 'already_exists'
+    })),
+    tagSync: tagSyncResults,
+    reputations: existingReputations
   };
   
-  for (let i = 0; i < results.length; i++) {
-    const binary = results[i];
+  if (toUpload.length === 0) {
+    console.log('No new files to upload.');
+    return uploadResults;
+  }
+  
+  for (let i = 0; i < toUpload.length; i++) {
+    const binary = toUpload[i];
     
     // Build tags array: SW_<package>@<version> and optionally REPO_<repo>
     const tags = [];
@@ -385,7 +682,7 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
     // Filename is the path below node_modules (using forward slashes)
     const filename = binary.file.replace(/\\/g, '/');
     
-    process.stdout.write(`[${i + 1}/${results.length}] Uploading ${filename}... `);
+    process.stdout.write(`[${i + 1}/${toUpload.length}] Uploading ${filename}... `);
     
     try {
       const result = await uploadFile(apiUrl, apiKey, binary.absolutePath, filename, tagString);
@@ -394,6 +691,7 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
           console.log('\x1b[32m✓ OK\x1b[0m');
           uploadResults.successful.push({
             file: filename,
+            sha256: binary.sha256,
             tags: tags,
             status: result.status
           });
@@ -410,6 +708,7 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
           }
           uploadResults.failed.push({
             file: filename,
+            sha256: binary.sha256,
             tags: tags,
             status: result.status,
             error: result.error
@@ -419,6 +718,7 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
       console.log(`\x1b[31m✗ Error: ${err.message}\x1b[0m`);
       uploadResults.failed.push({
         file: filename,
+        sha256: binary.sha256,
         tags: tags,
         error: err.message
       });
@@ -428,8 +728,9 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
   // Summary
   console.log('\n' + '-'.repeat(60));
   console.log('Upload Summary:');
-  console.log(`  Successful: ${uploadResults.successful.length}`);
+  console.log(`  Uploaded: ${uploadResults.successful.length}`);
   console.log(`  Failed: ${uploadResults.failed.length}`);
+  console.log(`  Skipped (already exist): ${uploadResults.skipped.length}`);
   
   if (uploadResults.failed.length > 0) {
     console.log('\nFailed uploads:');
@@ -438,7 +739,157 @@ async function uploadBinaries(results, apiUrl, apiKey, repo) {
     }
   }
   
+  // Report on threats found in existing files and emit GitHub Actions annotations
+  emitThreatAnnotations(existingReputations);
+  
   return uploadResults;
+}
+
+/**
+ * Emit GitHub Actions annotations for threat detections
+ * @param {object[]} reputations - Array of reputation results
+ */
+function emitThreatAnnotations(reputations) {
+  if (!reputations || reputations.length === 0) return;
+  
+  const threats = {
+    high: [],
+    medium: [],
+    caution: []
+  };
+  
+  // Categorize threats by reputation type
+  for (const rep of reputations) {
+    if (!rep.reputation) continue;
+    
+    const file = rep.file;
+    const pkg = `${rep.package}@${rep.version}`;
+    const r = rep.reputation;
+    
+    // AV reputation
+    if (r.antivirus) {
+      const avLevel = r.antivirus.threatLevel;
+      if (avLevel === 'high') {
+        threats.high.push({
+          type: 'AV',
+          file,
+          pkg,
+          detail: `AV Detection: ${r.antivirus.detectionRatio} - ${r.antivirus.verdict}`,
+          topThreats: r.antivirus.topThreats?.slice(0, 3).join(', ')
+        });
+      } else if (avLevel === 'medium') {
+        threats.medium.push({
+          type: 'AV',
+          file,
+          pkg,
+          detail: `AV Detection: ${r.antivirus.detectionRatio} - ${r.antivirus.verdict}`
+        });
+      } else if (avLevel === 'caution') {
+        threats.caution.push({
+          type: 'AV',
+          file,
+          pkg,
+          detail: `AV Detection: ${r.antivirus.detectionRatio} - ${r.antivirus.verdict}`
+        });
+      }
+    }
+    
+    // Similarity reputation
+    if (r.similarity) {
+      const simLevel = r.similarity.threatLevel;
+      if (simLevel === 'high') {
+        threats.high.push({
+          type: 'Similarity',
+          file,
+          pkg,
+          detail: `Malicious clone detected (${r.similarity.cloneCount} clones, ${r.similarity.similarCount} similar)`
+        });
+      } else if (simLevel === 'medium') {
+        threats.medium.push({
+          type: 'Similarity',
+          file,
+          pkg,
+          detail: `Suspicious similarity (${r.similarity.similarCount} similar files)`
+        });
+      }
+    }
+    
+    // Signature reputation
+    if (r.signature) {
+      const sigLevel = r.signature.threatLevel;
+      if (sigLevel === 'high') {
+        threats.high.push({
+          type: 'Signature',
+          file,
+          pkg,
+          detail: `Invalid code signature: ${r.signature.signatureStatus}`
+        });
+      } else if (sigLevel === 'caution' && r.signature.signatureStatus === 'unsigned') {
+        threats.caution.push({
+          type: 'Signature',
+          file,
+          pkg,
+          detail: 'Unsigned binary'
+        });
+      }
+    }
+  }
+  
+  // Print console summary
+  const totalThreats = threats.high.length + threats.medium.length + threats.caution.length;
+  if (totalThreats > 0) {
+    console.log('\n' + '='.repeat(60));
+    console.log('\x1b[31m⚠  THREAT ANALYSIS RESULTS\x1b[0m');
+    console.log('='.repeat(60));
+    
+    if (threats.high.length > 0) {
+      console.log(`\n\x1b[31m  HIGH THREATS: ${threats.high.length}\x1b[0m`);
+      for (const t of threats.high) {
+        console.log(`    [${t.type}] ${t.file}`);
+        console.log(`           Package: ${t.pkg}`);
+        console.log(`           ${t.detail}`);
+        if (t.topThreats) console.log(`           Threats: ${t.topThreats}`);
+      }
+    }
+    
+    if (threats.medium.length > 0) {
+      console.log(`\n\x1b[33m  MEDIUM THREATS: ${threats.medium.length}\x1b[0m`);
+      for (const t of threats.medium) {
+        console.log(`    [${t.type}] ${t.file}`);
+        console.log(`           Package: ${t.pkg}`);
+        console.log(`           ${t.detail}`);
+      }
+    }
+    
+    if (threats.caution.length > 0) {
+      console.log(`\n\x1b[33m  CAUTION: ${threats.caution.length}\x1b[0m`);
+      for (const t of threats.caution) {
+        console.log(`    [${t.type}] ${t.file}`);
+        console.log(`           ${t.detail}`);
+      }
+    }
+  }
+  
+  // Emit GitHub Actions annotations
+  // HIGH threats = errors
+  for (const t of threats.high) {
+    const msg = `[${t.type}] ${t.pkg}: ${t.detail}`;
+    console.log(`::error title=High Threat - ${t.type}::${t.file} - ${msg}`);
+  }
+  
+  // MEDIUM threats = warnings
+  for (const t of threats.medium) {
+    const msg = `[${t.type}] ${t.pkg}: ${t.detail}`;
+    console.log(`::warning title=Medium Threat - ${t.type}::${t.file} - ${msg}`);
+  }
+  
+  // CAUTION = notices
+  for (const t of threats.caution) {
+    const msg = `[${t.type}] ${t.pkg}: ${t.detail}`;
+    console.log(`::notice title=Caution - ${t.type}::${t.file} - ${msg}`);
+  }
+  
+  return threats;
 }
 
 /**
@@ -563,7 +1014,10 @@ async function scanNodeModules(targetDir, options = {}) {
       process.exit(1);
     }
     
-    const uploadResults = await uploadBinaries(results, options.apiUrl, options.apiKey, options.repo);
+    const uploadResults = await uploadBinaries(results, options.apiUrl, options.apiKey, options.repo, {
+      skipExisting: options.skipExisting,
+      getReputations: options.getReputations
+    });
     jsonOutput.uploadResults = uploadResults;
     
     // Update JSON with upload results
@@ -581,6 +1035,8 @@ function parseArgs(args) {
     targetDir: process.cwd(),
     deep: false,
     upload: false,
+    skipExisting: true,
+    getReputations: true,
     apiUrl: process.env.UC_API_URL || '',
     apiKey: process.env.UC_API_KEY || '',
     repo: process.env.UC_REPO || ''
@@ -596,6 +1052,10 @@ function parseArgs(args) {
       options.deep = true;
     } else if (arg === '--upload') {
       options.upload = true;
+    } else if (arg === '--force-upload' || arg === '--no-skip') {
+      options.skipExisting = false;
+    } else if (arg === '--no-reputations') {
+      options.getReputations = false;
     } else if (arg === '--api-url') {
       options.apiUrl = args[++i];
     } else if (arg === '--api-key') {
@@ -624,6 +1084,8 @@ Usage:
 Options:
   --deep              Enable deep scan using magic bytes (slower but finds more)
   --upload            Upload found executables to UnknownCyber API
+  --force-upload      Upload all files even if they already exist in UC
+  --no-reputations    Skip fetching reputation data for existing files
   --api-url <url>     API base URL (or set UC_API_URL env var)
   --api-key <key>     API key for authentication (or set UC_API_KEY env var)
   --repo <name>       Repository name to tag uploads with (or set UC_REPO env var)
@@ -639,8 +1101,11 @@ Examples:
   # Deep scan with magic byte detection
   node scanner.js --deep
   
-  # Scan and upload to UnknownCyber
+  # Scan and upload to UnknownCyber (skips existing files by default)
   node scanner.js --upload --api-url https://api.unknowncyber.com --api-key YOUR_KEY
+  
+  # Force upload all files (even if they exist)
+  node scanner.js --upload --force-upload --api-key YOUR_KEY
   
   # Scan and upload with repository tag
   node scanner.js --upload --repo my-org/my-repo --api-key YOUR_KEY
@@ -664,6 +1129,15 @@ Detected Script Types (potential attack vectors):
   - Unix: SH, BASH, ZSH, CSH, KSH
   - Cross-platform: PL (Perl), RB (Ruby), PY/PYW (Python)
 
+Upload Behavior:
+  By default, the scanner checks if files already exist in UnknownCyber by
+  computing SHA256 hashes and querying the API. Files that already exist are
+  skipped, and their reputation data is fetched and displayed.
+
+  - Files with HIGH or MEDIUM threat levels are highlighted in the output
+  - Use --force-upload to upload all files regardless of existence
+  - Use --no-reputations to skip fetching reputation data
+
 Upload Details:
   When --upload is specified, each executable is uploaded with:
   - Filename: Path relative to node_modules (e.g., "@esbuild/win32-x64/esbuild.exe")
@@ -672,7 +1146,8 @@ Upload Details:
 
 Output:
   - Console output grouped by package (⚙️ for binaries, 📜 for scripts)
-  - JSON file (binary-scan-results.json) with detailed results and upload status
+  - JSON file (binary-scan-results.json) with detailed results, upload status,
+    and reputation data for existing files
 `);
 }
 
