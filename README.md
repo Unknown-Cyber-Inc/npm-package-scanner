@@ -69,6 +69,24 @@ Validates digital signatures on executables to establish trust:
 
 Invalid signatures are strong indicators of tampering and warrant immediate investigation.
 
+### 📜 License Compliance
+
+Automatically scans all packages for license compatibility issues:
+
+| Category | Examples | Risk Level |
+|----------|----------|------------|
+| ✅ **Allowed** | MIT, Apache-2.0, BSD, ISC | Safe for commercial use |
+| ⚠️ **Warning** | LGPL, MPL, EPL | May have conditions, review recommended |
+| ❌ **Denied** | GPL, AGPL, SSPL, CC-NC | Strong copyleft or commercial restrictions |
+
+Key capabilities:
+- **Policy presets**: `permissive` (default), `strict`, `copyleft-ok`
+- **Custom policies**: Define your own allowed/warning/denied lists
+- **Package overrides**: Approve specific packages after review
+- **Transitive scanning**: Checks nested dependencies, not just direct
+
+📖 See the [License Compliance Guide](docs/LICENSE-COMPLIANCE.md) for detailed documentation on license types, risks, and policy configuration.
+
 ### 📦 Dependency Inventory & SBOM Compliance
 
 Beyond security scanning, uploading to UnknownCyber builds a **centralized inventory** of all third-party packages across your organization's repositories. Each file is tagged with package name, version, and source repository—giving you a single source of truth for dependency tracking. This helps organizations:
@@ -82,9 +100,8 @@ Beyond security scanning, uploading to UnknownCyber builds a **centralized inven
 | Feature | Description |
 |---------|-------------|
 | **CVE Scanning** | Check binaries against known vulnerabilities database |
-| **License Compliance** | Detect license conflicts in native dependencies |
 | **Security Hardening** | Verify ASLR, DEP, stack canaries, and other protections |
-| **SBOM Generation** | Software Bill of Materials for dependency tracking |
+| **SBOM Generation** | Software Bill of Materials in SPDX/CycloneDX formats |
 
 ## Features
 
