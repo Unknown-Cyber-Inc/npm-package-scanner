@@ -16,23 +16,74 @@ NPM packages can include pre-compiled native binaries and executable scripts. Wh
 | **Vulnerability Gaps** | Memory-unsafe languages (C/C++) can have vulnerabilities not caught by JS tooling |
 | **Post-Install Scripts** | Scripts in `preinstall`/`postinstall` hooks can execute malware |
 
-This tool helps you:
-- **Audit** which packages contain native code
-- **Upload** binaries to UnknownCyber for malware analysis
-- **Monitor** known threats in your dependency tree
-- **Alert** on suspicious or malicious files
+## Security Analysis
+
+This tool performs multiple layers of security analysis to detect threats that traditional scanners miss:
+
+### 🦠 Antivirus Detection
+
+Files are scanned by **70+ antivirus engines** via UnknownCyber. This multi-engine approach catches threats that any single AV might miss, providing comprehensive malware detection with minimal false negatives.
+
+| Detection Ratio | Threat Level | Action |
+|-----------------|--------------|--------|
+| ≥10% of engines | 🔴 HIGH | Block pipeline, immediate investigation |
+| ≥1% of engines | 🟡 MEDIUM | Warning, review recommended |
+| Any detection | 🟠 CAUTION | Notice, monitor for changes |
+
+### 🧬 Genomic Similarity Analysis
+
+Beyond signature-based detection, UnknownCyber analyzes the **structural DNA** of executables. This catches:
+
+- **Zero-day threats**: Malware variants that haven't been catalogued yet
+- **Polymorphic malware**: Code that mutates to evade signatures
+- **Repacked threats**: Known malware hidden in new wrappers
+- **Code reuse**: Components borrowed from known malicious families
+
+Even if a file is brand new and has zero AV detections, genomic analysis can identify it as structurally similar to known threats—catching attacks before they're widely recognized.
+
+### 🔍 YARA Pattern Scanning
+
+Local pattern matching using YARA rules detects:
+
+- **Obfuscated JavaScript**: Encoded payloads, suspicious string patterns
+- **Crypto miners**: Mining pools, XMRig, CPU/GPU miner signatures
+- **Backdoors & Webshells**: Remote access tools, command injection patterns
+- **Suspicious behaviors**: PowerShell cradles, process injection, anti-debugging
+
+Bundled rules target npm-specific threats like the Shai Hulud worm and other supply chain attacks.
+
+### ✍️ Code Signature Verification
+
+Validates digital signatures on executables to establish trust:
+
+| Status | Meaning |
+|--------|---------|
+| ✅ **Valid** | Signed by trusted publisher, signature intact |
+| ⚠️ **Invalid** | Signature broken or tampered |
+| ❓ **Unsigned** | No signature (common for open-source tools) |
+
+Invalid signatures are strong indicators of tampering and warrant immediate investigation.
+
+### 🔮 Coming Soon
+
+| Feature | Description |
+|---------|-------------|
+| **CVE Scanning** | Check binaries against known vulnerabilities database |
+| **License Compliance** | Detect license conflicts in native dependencies |
+| **Security Hardening** | Verify ASLR, DEP, stack canaries, and other protections |
+| **SBOM Generation** | Software Bill of Materials for dependency tracking |
 
 ## Features
 
 - 🔍 **Comprehensive Detection**: Identifies binaries by file extension and magic bytes
 - 📦 **Package Attribution**: Associates each binary with its parent npm package and version
 - 🔄 **Handles Nested Dependencies**: Scans all direct and transitive dependencies  
-- ☁️ **UnknownCyber Integration**: Upload binaries for malware analysis
-- 🔒 **Smart Deduplication**: Skips files already in UnknownCyber to save time and bandwidth
-- ⚠️ **Threat Detection**: Fetches and displays reputation data for existing files
-- 🧬 **YARA Scanning**: Local pattern matching for malware and suspicious patterns
+- ☁️ **UnknownCyber Integration**: Upload binaries for multi-layer threat analysis
+- 🔒 **Smart Deduplication**: Skips files already analyzed to save time and bandwidth
+- 🏷️ **Automatic Tagging**: Tags files with package manager, package name, version, and repository
+- ⚠️ **Pipeline Integration**: Blocks CI/CD on high-severity threats with detailed annotations
 - 📊 **Detailed Reports**: JSON output with full scan results and threat assessments
-- 🚀 **GitHub Action**: Easy CI/CD integration
+- 🚀 **GitHub Action & CLI**: Flexible integration options
 
 ## Quick Start
 
