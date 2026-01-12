@@ -282,8 +282,9 @@ function scanDirectory(dir, nodeModulesRoot, results, visited = new Set()) {
             detectedType = magicType;
           }
         }
-        // Include all other files if in all-files mode
-        else if (includeAllFiles) {
+        
+        // Include all other files if in all-files mode (and no type detected yet)
+        if (!detectedType && includeAllFiles) {
           const ext = path.extname(fullPath).toLowerCase();
           detectedType = ext ? ext.slice(1).toUpperCase() : 'FILE';
           category = 'other';
