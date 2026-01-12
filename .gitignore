@@ -22,6 +22,7 @@ test-upload.js
 rename-tags.js
 copy-project.js
 create-demo.js
+push-versions.js
 
 # Python
 __pycache__/

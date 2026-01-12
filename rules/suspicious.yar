@@ -3,26 +3,6 @@
  * These rules detect potentially malicious behavior patterns
  */
 
-rule Suspicious_PowerShell_Download {
-    meta:
-        description = "Detects PowerShell download cradles"
-        severity = "medium"
-        category = "suspicious"
-    strings:
-        $ps1 = "powershell" ascii nocase
-        $ps2 = "pwsh" ascii nocase
-        $dl1 = "DownloadString" ascii nocase
-        $dl2 = "DownloadFile" ascii nocase
-        $dl3 = "Invoke-WebRequest" ascii nocase
-        $dl4 = "IWR" ascii nocase
-        $dl5 = "wget" ascii nocase
-        $dl6 = "curl" ascii nocase
-        $iex1 = "Invoke-Expression" ascii nocase
-        $iex2 = "IEX" ascii nocase
-    condition:
-        ($ps1 or $ps2) and (($dl1 or $dl2 or $dl3 or $dl4 or $dl5 or $dl6) or ($iex1 or $iex2))
-}
-
 rule Suspicious_Base64_Execution {
     meta:
         description = "Detects Base64 encoded command execution"
