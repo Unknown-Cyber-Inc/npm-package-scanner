@@ -63,22 +63,31 @@ inputs:
 outputs:
   total-packages:
     description: 'Number of packages containing binaries'
+    value: ${{ steps.scan.outputs.total-packages }}
   total-binaries:
     description: 'Total number of binary files found'
+    value: ${{ steps.scan.outputs.total-binaries }}
   results-file:
     description: 'Path to the JSON results file'
+    value: ${{ steps.scan.outputs.results-file }}
   upload-successful:
     description: 'Number of successfully uploaded files'
+    value: ${{ steps.scan.outputs.upload-successful }}
   upload-failed:
     description: 'Number of failed uploads'
+    value: ${{ steps.scan.outputs.upload-failed }}
   upload-skipped:
     description: 'Number of files skipped (already exist in UC)'
+    value: ${{ steps.scan.outputs.upload-skipped }}
   threats-found:
     description: 'Number of files with HIGH or MEDIUM threat level'
+    value: ${{ steps.scan.outputs.threats-found }}
   yara-matches:
     description: 'Number of files with YARA rule matches'
+    value: ${{ steps.yara.outputs.yara-matches }}
   yara-high-severity:
     description: 'Number of files with high/critical severity YARA matches'
+    value: ${{ steps.yara.outputs.yara-high-severity }}
 
 runs:
   using: 'composite'

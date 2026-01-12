@@ -19,6 +19,9 @@ Thumbs.db
 test-project/
 test-reputation.js
 test-upload.js
+rename-tags.js
+copy-project.js
+create-demo.js
 
 # Python
 __pycache__/
