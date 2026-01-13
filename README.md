@@ -818,6 +818,96 @@ git push
 
 This triggers download of known malware samples to a fake `lodash_infected` package, which the YARA scanner will detect and block.
 
+## Malware Test Injection
+
+A reusable composite action is included for injecting **real malware samples** into any ecosystem for security testing. This validates that your scanning setup correctly detects threats.
+
+### Quick Start
+
+```yaml
+- uses: Unknown-Cyber-Inc/npm-package-scanner/malware-test-inject@main
+  with:
+    api-key: ${{ secrets.UC_API_KEY }}
+    ecosystem: npm
+    package-name: fake-malware-package
+```
+
+### Supported Ecosystems
+
+| Ecosystem | Target Directory |
+|-----------|------------------|
+| `npm` | `node_modules/<package>/` |
+| `pip` | `site-packages/<package>/` |
+| `maven` | `.m2/repository/com/test/<package>/<version>/` |
+| `cargo` | `target/release/` |
+| `go` | `vendor/github.com/test/<package>/` |
+| `ruby` | `vendor/bundle/ruby/gems/<package>-<version>/` |
+| `nuget` | `packages/<package>/<version>/` |
+| `generic` | `./<package>/` |
+
+### Available Samples
+
+| Sample Type | Description | Detection |
+|-------------|-------------|-----------|
+| `obfuscated-js` | Shai Hulud obfuscated JavaScript backdoor | 45+ AV engines |
+| `elf-malware` | Neotyxa Linux ELF malware binary | 52+ AV engines |
+| `pe-malware` | Windows PE malware executable | 38+ AV engines |
+| `all` | Download all available samples | - |
+
+### Conditional Injection
+
+Inject only when explicitly requested:
+
+```yaml
+# Via workflow dispatch checkbox
+- uses: Unknown-Cyber-Inc/npm-package-scanner/malware-test-inject@main
+  if: ${{ inputs.inject-malware }}
+  with:
+    api-key: ${{ secrets.UC_API_KEY }}
+
+# Via commit message
+- uses: Unknown-Cyber-Inc/npm-package-scanner/malware-test-inject@main
+  if: contains(github.event.head_commit.message, 'infected')
+  with:
+    api-key: ${{ secrets.UC_API_KEY }}
+```
+
+### Complete Testing Workflow
+
+```yaml
+name: Security Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      inject-malware:
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm install
+      
+      # Inject malware (only when requested)
+      - uses: Unknown-Cyber-Inc/npm-package-scanner/malware-test-inject@main
+        if: ${{ inputs.inject-malware }}
+        with:
+          api-key: ${{ secrets.UC_API_KEY }}
+          ecosystem: npm
+          samples: obfuscated-js,elf-malware
+      
+      # Scan and fail if malware detected
+      - uses: Unknown-Cyber-Inc/npm-package-scanner@main
+        with:
+          api-key: ${{ secrets.UC_API_KEY }}
+          fail-on-threats: 'true'
+```
+
+📖 See [malware-test-inject/README.md](malware-test-inject/README.md) for full documentation.
+
 ### Setup Steps
 
 1. Create the demo: `node create-demo.js ../my-demo --repo-name=my-demo`

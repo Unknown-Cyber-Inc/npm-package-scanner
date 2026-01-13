@@ -186,6 +186,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      inject-malware:
+        description: 'Inject malware samples for testing'
+        type: boolean
+        default: false
+      malware-samples:
+        description: 'Sample types to inject (obfuscated-js,elf-malware,pe-malware,all)'
+        type: string
+        default: 'all'
 
 jobs:
   scan:
@@ -199,34 +208,18 @@ jobs:
       
       - run: npm install
       
-      - name: Download malware samples for testing
-        if: hashFiles('package.json') && contains(github.event.head_commit.message, 'infected')
-        env:
-          UC_API_KEY: \${{ secrets.UC_API_KEY }}
-        run: |
-          # Create infected package directory
-          mkdir -p node_modules/lodash_infected
-          
-          # Create package.json for the fake package
-          echo '{"name":"lodash_infected","version":"4.17.21-infected","description":"Simulated compromised package for demo"}' > node_modules/lodash_infected/package.json
-          
-          # Download bun_environment.js (Shai Hulud obfuscated JS)
-          # Note: UC API returns raw file content when called programmatically
-          HTTP_CODE=\$(curl -s -w "%{http_code}" -o node_modules/lodash_infected/bun_environment.js "https://api.unknowncyber.com/v2/files/cbb9bc5a8496243e02f3cc080efbe3e4a1430ba0671f2e43a202bf45b05479cd/download/?key=\$UC_API_KEY")
-          echo "Download bun_environment.js: HTTP \$HTTP_CODE, size \$(stat -c%s node_modules/lodash_infected/bun_environment.js 2>/dev/null || echo 0) bytes"
-          
-          # Download neotyxa.exe (actual malware binary - ELF format)
-          HTTP_CODE=\$(curl -s -w "%{http_code}" -o node_modules/lodash_infected/neotyxa.exe "https://api.unknowncyber.com/v2/files/7f20b9e8235746e29e853a4793f64b2a02cf6a4eeca56fd3bd1e110bb4a84b0e/download/?key=\$UC_API_KEY")
-          echo "Download neotyxa.exe: HTTP \$HTTP_CODE, size \$(stat -c%s node_modules/lodash_infected/neotyxa.exe 2>/dev/null || echo 0) bytes"
-          
-          # Verify downloads
-          echo "=== lodash_infected contents ==="
-          ls -la node_modules/lodash_infected/
-          echo ""
-          echo "=== File types ==="
-          file node_modules/lodash_infected/* || true
+      # Inject malware samples for testing (via workflow dispatch or commit message)
+      - name: Inject malware test samples
+        uses: Unknown-Cyber-Inc/npm-package-scanner/malware-test-inject@main
+        if: \${{ inputs.inject-malware || contains(github.event.head_commit.message, 'infected') }}
+        with:
+          api-key: \${{ secrets.UC_API_KEY }}
+          ecosystem: npm
+          package-name: lodash_infected
+          package-version: 4.17.21-infected
+          samples: \${{ inputs.malware-samples || 'all' }}
       
-      - name: Scan npm packages
+      - name: Scan packages
         uses: Unknown-Cyber-Inc/npm-package-scanner@main
         id: scan
         with:
@@ -234,9 +227,10 @@ jobs:
           deep-scan: 'true'
           include-all-files: 'true'
           yara-scan: 'true'
-          yara-include: '*.js,*.exe'
+          yara-include: '*.js,*.exe,*.elf'
           generate-summary: 'true'
           fail-on-threats: 'true'
+          license-check: 'true'
           api-key: \${{ secrets.UC_API_KEY }}
 `;
 }
