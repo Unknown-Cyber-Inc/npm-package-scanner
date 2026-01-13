@@ -27,7 +27,7 @@ Packages can include pre-compiled native binaries and executable scripts. While 
 
 | Risk | Description |
 |------|-------------|
-| **Supply Chain Attacks** | Malicious binaries injected into popular packages can execute arbitrary code during `npm install` |
+| **Supply Chain Attacks** | Malicious binaries injected into popular packages can execute arbitrary code during build, install, or other dev stages |
 | **Invisible Threats** | Native code bypasses JavaScript-based security scanners |
 | **License Compliance** | Native binaries may carry different licensing terms than the JavaScript wrapper |
 | **Vulnerability Gaps** | Memory-unsafe languages (C/C++) can have vulnerabilities not caught by JS tooling |
@@ -72,7 +72,7 @@ Local pattern matching using YARA rules detects:
 - **Backdoors & Webshells**: Remote access tools, command injection patterns
 - **Suspicious behaviors**: PowerShell cradles, process injection, anti-debugging
 
-Bundled rules target npm-specific threats like the Shai Hulud worm and other supply chain attacks.
+Bundled rules target supply-chain threats like the Shai Hulud worm and others.
 
 ### ✍️ Code Signature Verification
 
