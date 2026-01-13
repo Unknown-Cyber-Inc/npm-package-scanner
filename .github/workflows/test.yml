@@ -304,6 +304,238 @@ jobs:
           # go-sqlite3 vendors C source files
           cat test-project/binary-scan-results.json
 
+  test-nuget-ecosystem:
+    name: Test NuGet/.NET Ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create NuGet test structure
+        run: |
+          # Create mock NuGet package structure
+          mkdir -p test-project/packages/Newtonsoft.Json.13.0.1/lib/net6.0
+          mkdir -p test-project/packages/System.Text.Json.8.0.0/lib/net8.0
+          
+          # Create .nuspec files
+          cat > test-project/packages/Newtonsoft.Json.13.0.1/Newtonsoft.Json.nuspec << 'EOF'
+          <?xml version="1.0"?>
+          <package><metadata><id>Newtonsoft.Json</id><version>13.0.1</version></metadata></package>
+          EOF
+          
+          cat > test-project/packages/System.Text.Json.8.0.0/System.Text.Json.nuspec << 'EOF'
+          <?xml version="1.0"?>
+          <package><metadata><id>System.Text.Json</id><version>8.0.0</version></metadata></package>
+          EOF
+          
+          # Create mock DLL files (with minimal PE header)
+          printf 'MZ\x90\x00\x03\x00\x00\x00' > test-project/packages/Newtonsoft.Json.13.0.1/lib/net6.0/Newtonsoft.Json.dll
+          printf 'MZ\x90\x00\x03\x00\x00\x00' > test-project/packages/System.Text.Json.8.0.0/lib/net8.0/System.Text.Json.dll
+
+      - name: Run Scanner (NuGet)
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          ecosystems: 'nuget'
+          deep-scan: 'true'
+          artifact-name: 'results-nuget'
+
+      - name: Verify NuGet detection
+        run: |
+          echo "=== NuGet Ecosystem Test ==="
+          echo "Ecosystems scanned: ${{ steps.scan.outputs.ecosystems-scanned }}"
+          echo "Total packages: ${{ steps.scan.outputs.total-packages }}"
+          echo "Total binaries: ${{ steps.scan.outputs.total-binaries }}"
+          
+          if [[ "${{ steps.scan.outputs.ecosystems-scanned }}" != *"nuget"* ]]; then
+            echo "::error::NuGet ecosystem was not detected"
+            exit 1
+          fi
+          
+          cat test-project/binary-scan-results.json
+          echo "✓ NuGet ecosystem test passed"
+
+  test-dpkg-ecosystem:
+    name: Test Debian/dpkg Ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create dpkg test structure
+        run: |
+          # Create mock Debian package structure
+          mkdir -p test-project/var/lib/dpkg/info
+          mkdir -p test-project/usr/lib/x86_64-linux-gnu
+          
+          # Create dpkg status file
+          cat > test-project/var/lib/dpkg/status << 'EOF'
+          Package: libssl1.1
+          Status: install ok installed
+          Version: 1.1.1f-1ubuntu2
+          Architecture: amd64
+          
+          Package: zlib1g
+          Status: install ok installed
+          Version: 1:1.2.11.dfsg-2ubuntu1
+          Architecture: amd64
+          EOF
+          
+          # Create .list files (what files belong to each package)
+          echo "/usr/lib/x86_64-linux-gnu/libssl.so.1.1" > test-project/var/lib/dpkg/info/libssl1.1.list
+          echo "/usr/lib/x86_64-linux-gnu/libz.so.1" > test-project/var/lib/dpkg/info/zlib1g.list
+          
+          # Create mock shared libraries (ELF header)
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/usr/lib/x86_64-linux-gnu/libssl.so.1.1
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/usr/lib/x86_64-linux-gnu/libz.so.1
+
+      - name: Run Scanner (dpkg)
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          ecosystems: 'dpkg'
+          deep-scan: 'true'
+          artifact-name: 'results-dpkg'
+
+      - name: Verify dpkg detection
+        run: |
+          echo "=== Debian/dpkg Ecosystem Test ==="
+          echo "Ecosystems scanned: ${{ steps.scan.outputs.ecosystems-scanned }}"
+          echo "Total packages: ${{ steps.scan.outputs.total-packages }}"
+          echo "Total binaries: ${{ steps.scan.outputs.total-binaries }}"
+          
+          if [[ "${{ steps.scan.outputs.ecosystems-scanned }}" != *"dpkg"* ]]; then
+            echo "::error::dpkg ecosystem was not detected"
+            exit 1
+          fi
+          
+          cat test-project/binary-scan-results.json
+          echo "✓ Debian/dpkg ecosystem test passed"
+
+  test-apk-ecosystem:
+    name: Test Alpine/apk Ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create apk test structure
+        run: |
+          # Create mock Alpine package structure
+          mkdir -p test-project/lib/apk/db
+          mkdir -p test-project/usr/lib
+          
+          # Create installed database
+          cat > test-project/lib/apk/db/installed << 'EOF'
+          P:musl
+          V:1.2.3-r0
+          A:x86_64
+          S:383152
+          I:622592
+          T:the musl c library
+          U:https://musl.libc.org/
+          L:MIT
+          o:musl
+          m:Maintainer <maintainer@alpinelinux.org>
+          t:1234567890
+          c:abc123
+          D:
+          p:so:libc.musl-x86_64.so.1=1
+          F:lib
+          R:ld-musl-x86_64.so.1
+          a:0:0:755
+          Z:Q1abc123=
+          R:libc.musl-x86_64.so.1
+          a:0:0:755
+          Z:Q1def456=
+          
+          P:openssl
+          V:3.0.8-r0
+          A:x86_64
+          T:OpenSSL libraries
+          L:Apache-2.0
+          F:usr/lib
+          R:libssl.so.3
+          a:0:0:755
+          Z:Q1xyz789=
+          EOF
+          
+          # Create mock shared libraries
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/usr/lib/libssl.so.3
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/lib/libc.musl-x86_64.so.1
+
+      - name: Run Scanner (apk)
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          ecosystems: 'apk'
+          deep-scan: 'true'
+          artifact-name: 'results-apk'
+
+      - name: Verify apk detection
+        run: |
+          echo "=== Alpine/apk Ecosystem Test ==="
+          echo "Ecosystems scanned: ${{ steps.scan.outputs.ecosystems-scanned }}"
+          echo "Total packages: ${{ steps.scan.outputs.total-packages }}"
+          echo "Total binaries: ${{ steps.scan.outputs.total-binaries }}"
+          
+          if [[ "${{ steps.scan.outputs.ecosystems-scanned }}" != *"apk"* ]]; then
+            echo "::error::apk ecosystem was not detected"
+            exit 1
+          fi
+          
+          cat test-project/binary-scan-results.json
+          echo "✓ Alpine/apk ecosystem test passed"
+
+  test-rpm-ecosystem:
+    name: Test RHEL/rpm Ecosystem
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create rpm test structure
+        run: |
+          # Create mock RPM package structure
+          mkdir -p test-project/var/lib/rpm
+          mkdir -p test-project/usr/lib64
+          
+          # Create a placeholder for RPM database (binary format, can't easily mock)
+          # The scanner uses heuristics for rpm when database isn't readable
+          touch test-project/var/lib/rpm/Packages
+          
+          # Create mock shared libraries with rpm-like naming
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/usr/lib64/libcrypto.so.1.1
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/usr/lib64/libssl.so.1.1
+          printf '\x7fELF\x02\x01\x01\x00' > test-project/usr/lib64/libcurl.so.4
+
+      - name: Run Scanner (rpm)
+        uses: ./
+        id: scan
+        with:
+          scan-path: 'test-project'
+          ecosystems: 'rpm'
+          deep-scan: 'true'
+          artifact-name: 'results-rpm'
+
+      - name: Verify rpm detection
+        run: |
+          echo "=== RHEL/rpm Ecosystem Test ==="
+          echo "Ecosystems scanned: ${{ steps.scan.outputs.ecosystems-scanned }}"
+          echo "Total packages: ${{ steps.scan.outputs.total-packages }}"
+          echo "Total binaries: ${{ steps.scan.outputs.total-binaries }}"
+          
+          if [[ "${{ steps.scan.outputs.ecosystems-scanned }}" != *"rpm"* ]]; then
+            echo "::error::rpm ecosystem was not detected"
+            exit 1
+          fi
+          
+          cat test-project/binary-scan-results.json
+          echo "✓ RHEL/rpm ecosystem test passed"
+
   test-auto-detect-multiple:
     name: Test Auto-Detect Multiple Ecosystems
     runs-on: ubuntu-latest
