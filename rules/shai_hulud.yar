@@ -29,7 +29,7 @@ rule JS_Obfuscated_ArrayRotate_ParseIntChain_Bundles
 
   condition:
     // keep scanning fast in node_modules bundles
-    filesize < 10MB
+    filesize < 15MB
     and $s_parse
     and $s_while
     and ( $s_push_s or $s_push_d )
