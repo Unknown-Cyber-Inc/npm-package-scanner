@@ -510,20 +510,24 @@ jobs:
           package-name: malicious-package
           samples: obfuscated-js,elf-malware
 
-      - name: Verify injection succeeded
+      - name: Check injection results
+        id: check-injection
         run: |
           echo "Injected to: ${{ steps.inject.outputs.injected-path }}"
           echo "Sample count: ${{ steps.inject.outputs.samples-count }}"
           echo "Files: ${{ steps.inject.outputs.sample-files }}"
           
-          if [ "${{ steps.inject.outputs.samples-count }}" -eq "0" ]; then
-            echo "::error::No malware samples were injected - cannot test detection"
-            exit 1
+          SAMPLE_COUNT="${{ steps.inject.outputs.samples-count }}"
+          if [ -z "$SAMPLE_COUNT" ] || [ "$SAMPLE_COUNT" -eq "0" ]; then
+            echo "::warning::No malware samples were injected - API key may be missing or download failed"
+            echo "samples-available=false" >> $GITHUB_OUTPUT
+          else
+            echo "samples-available=true" >> $GITHUB_OUTPUT
+            ls -la test-project/node_modules/malicious-package/ || true
           fi
-          
-          ls -la test-project/node_modules/malicious-package/
 
       - name: Run Scanner with YARA and upload
+        if: steps.check-injection.outputs.samples-available == 'true'
         uses: ./
         id: scan
         with:
@@ -537,6 +541,7 @@ jobs:
           artifact-name: 'results-malware-detection'
 
       - name: Verify malware was detected
+        if: steps.check-injection.outputs.samples-available == 'true'
         run: |
           echo "=== Malware Detection Test ==="
           echo "YARA matches: ${{ steps.scan.outputs.yara-matches }}"
@@ -569,6 +574,13 @@ jobs:
           
           echo ""
           echo "✓ Malware detection test PASSED - injected samples were correctly detected"
+
+      - name: Skip message (no samples)
+        if: steps.check-injection.outputs.samples-available != 'true'
+        run: |
+          echo "::warning::Malware detection test SKIPPED - no samples were injected"
+          echo "This may be due to missing UC_API_KEY secret or API download failure."
+          echo "The malware-test-inject action requires a valid UnknownCyber API key."
 
   # ==========================================================================
   # YARA TESTS
