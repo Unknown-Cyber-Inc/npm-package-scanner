@@ -35,6 +35,10 @@ inputs:
     description: 'Include package.json files for SBOM creation'
     required: false
     default: 'false'
+  include-lock-files:
+    description: 'Include lock files for SBOM generation (package-lock.json, yarn.lock, requirements.txt, Cargo.lock, go.sum, etc.)'
+    required: false
+    default: 'false'
   include-all-files:
     description: 'Include ALL files in package directories (not just executables)'
     required: false
@@ -148,6 +152,7 @@ runs:
         SKIP_EXISTING: ${{ inputs.skip-existing }}
         GET_REPUTATIONS: ${{ inputs.get-reputations }}
         INCLUDE_PACKAGE_JSON: ${{ inputs.include-package-json }}
+        INCLUDE_LOCK_FILES: ${{ inputs.include-lock-files }}
         INCLUDE_ALL_FILES: ${{ inputs.include-all-files }}
         UC_API_URL: ${{ inputs.api-url }}
         UC_API_KEY: ${{ inputs.api-key }}
@@ -171,6 +176,9 @@ runs:
         fi
         if [ "$INCLUDE_PACKAGE_JSON" = "true" ]; then
           ARGS="$ARGS --include-package-json"
+        fi
+        if [ "$INCLUDE_LOCK_FILES" = "true" ]; then
+          ARGS="$ARGS --include-lock-files"
         fi
         if [ "$INCLUDE_ALL_FILES" = "true" ]; then
           ARGS="$ARGS --all-files"

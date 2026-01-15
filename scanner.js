@@ -102,8 +102,20 @@ const SKIP_PATTERNS = [
   /\.pyo$/
 ];
 
+// Lock files by ecosystem for SBOM generation
+const LOCK_FILES = {
+  npm: ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'],
+  pip: ['requirements.txt', 'Pipfile.lock', 'poetry.lock'],
+  cargo: ['Cargo.lock'],
+  go: ['go.sum', 'go.mod'],
+  ruby: ['Gemfile.lock'],
+  nuget: ['packages.lock.json'],
+  maven: ['pom.xml'] // Maven uses pom.xml for dependency management
+};
+
 let deepMagicScan = false;
 let includePackageJson = false;
+let includeLockFiles = false;
 let includeAllFiles = false;
 let scannedDirs = 0;
 let scannedFiles = 0;
@@ -202,6 +214,15 @@ function isScriptByExtension(filePath) {
 }
 
 /**
+ * Check if a file is a lock file for the given ecosystem
+ */
+function isLockFile(filename, ecosystem) {
+  if (!ecosystem) return false;
+  const lockFiles = LOCK_FILES[ecosystem.name] || [];
+  return lockFiles.includes(filename);
+}
+
+/**
  * Should skip this file based on patterns and scan mode?
  */
 function shouldSkipFile(filename) {
@@ -210,6 +231,14 @@ function shouldSkipFile(filename) {
   
   // If including package.json, don't skip it
   if (includePackageJson && filename === 'package.json') return false;
+  
+  // If including lock files, check if this is a lock file
+  if (includeLockFiles) {
+    // Check against all ecosystem lock files
+    for (const lockFiles of Object.values(LOCK_FILES)) {
+      if (lockFiles.includes(filename)) return false;
+    }
+  }
   
   return SKIP_PATTERNS.some(pattern => pattern.test(filename));
 }
@@ -288,6 +317,11 @@ function scanDirectory(dir, rootDir, results, ecosystem, visited = new Set()) {
         // Check for package.json (for SBOM)
         else if ((includePackageJson || includeAllFiles) && entry.name === 'package.json') {
           detectedType = 'JSON';
+          category = 'metadata';
+        }
+        // Check for lock files (for SBOM)
+        else if ((includeLockFiles || includeAllFiles) && isLockFile(entry.name, ecosystem)) {
+          detectedType = 'LOCK';
           category = 'metadata';
         }
         // Deep scan: check magic bytes for binaries without known extensions
@@ -1214,6 +1248,7 @@ function parseArgs(args) {
     skipExisting: true,
     getReputations: true,
     includePackageJson: false,
+    includeLockFiles: false,
     includeAllFiles: false,
     apiUrl: process.env.UC_API_URL || '',
     apiKey: process.env.UC_API_KEY || '',
@@ -1250,6 +1285,8 @@ function parseArgs(args) {
       options.getReputations = false;
     } else if (arg === '--include-package-json' || arg === '--package-json') {
       options.includePackageJson = true;
+    } else if (arg === '--include-lock-files' || arg === '--lock-files') {
+      options.includeLockFiles = true;
     } else if (arg === '--all-files') {
       options.includeAllFiles = true;
     } else if (arg === '--api-url') {
@@ -1290,6 +1327,8 @@ Scan Options:
 
 File Selection:
   --include-package-json  Include package.json files (for SBOM creation)
+  --include-lock-files    Include lock files for SBOM generation
+                          (package-lock.json, yarn.lock, requirements.txt, etc.)
   --all-files             Include ALL files (not just executables)
 
 Upload Options:
@@ -1355,6 +1394,7 @@ const options = parseArgs(args);
 
 deepMagicScan = options.deep;
 includePackageJson = options.includePackageJson;
+includeLockFiles = options.includeLockFiles;
 includeAllFiles = options.includeAllFiles;
 
 scanPackages(options.targetDir, options);
