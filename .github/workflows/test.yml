@@ -943,3 +943,126 @@ jobs:
             exit 1
           fi
           echo "✓ All files included"
+
+  # ==========================================================================
+  # CONFIG SCANNER TESTS
+  # Test configuration misconfiguration detection (Phase 1 - Universal Detectors)
+  # ==========================================================================
+
+  test-config-fixtures:
+    name: Verify Config Test Fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify test fixture structure
+        run: |
+          echo "=== Verifying Config Scanner Test Fixtures ==="
+          
+          # Check directory structure exists
+          dirs=(
+            "test-configs/secrets/bad"
+            "test-configs/secrets/good"
+            "test-configs/network/bad"
+            "test-configs/network/good"
+            "test-configs/tls/bad"
+            "test-configs/tls/good"
+            "test-configs/debug/bad"
+            "test-configs/debug/good"
+            "test-configs/false-positives"
+          )
+          
+          for dir in "${dirs[@]}"; do
+            if [ ! -d "$dir" ]; then
+              echo "::error::Missing test fixture directory: $dir"
+              exit 1
+            fi
+            count=$(ls -1 "$dir" | wc -l)
+            echo "✓ $dir ($count files)"
+          done
+          
+          echo ""
+          echo "=== Test Fixture Summary ==="
+          echo "Secrets bad configs: $(ls -1 test-configs/secrets/bad | wc -l)"
+          echo "Secrets good configs: $(ls -1 test-configs/secrets/good | wc -l)"
+          echo "Network bad configs: $(ls -1 test-configs/network/bad | wc -l)"
+          echo "Network good configs: $(ls -1 test-configs/network/good | wc -l)"
+          echo "TLS bad configs: $(ls -1 test-configs/tls/bad | wc -l)"
+          echo "TLS good configs: $(ls -1 test-configs/tls/good | wc -l)"
+          echo "Debug bad configs: $(ls -1 test-configs/debug/bad | wc -l)"
+          echo "Debug good configs: $(ls -1 test-configs/debug/good | wc -l)"
+          echo "False positive tests: $(ls -1 test-configs/false-positives | wc -l)"
+
+      - name: Verify bad configs contain expected patterns
+        run: |
+          echo "=== Verifying Bad Configs Contain Detectable Patterns ==="
+          
+          # Secrets - should contain password/api_key patterns
+          if ! grep -rq "password" test-configs/secrets/bad/; then
+            echo "::error::Secrets bad configs should contain password patterns"
+            exit 1
+          fi
+          echo "✓ Secrets bad configs contain password patterns"
+          
+          # Network - should contain 0.0.0.0 patterns
+          if ! grep -rq "0\.0\.0\.0" test-configs/network/bad/; then
+            echo "::error::Network bad configs should contain 0.0.0.0 patterns"
+            exit 1
+          fi
+          echo "✓ Network bad configs contain 0.0.0.0 patterns"
+          
+          # TLS - should contain TLSv1 patterns
+          if ! grep -rq "TLSv1" test-configs/tls/bad/; then
+            echo "::error::TLS bad configs should contain TLSv1 patterns"
+            exit 1
+          fi
+          echo "✓ TLS bad configs contain TLSv1 patterns"
+          
+          # Debug - should contain debug=true patterns
+          if ! grep -riq "debug" test-configs/debug/bad/; then
+            echo "::error::Debug bad configs should contain debug patterns"
+            exit 1
+          fi
+          echo "✓ Debug bad configs contain debug patterns"
+
+      - name: Verify good configs use safe patterns
+        run: |
+          echo "=== Verifying Good Configs Use Safe Patterns ==="
+          
+          # Secrets good - should use env vars, not hardcoded
+          if grep -rq 'password.*=.*"[A-Za-z0-9]' test-configs/secrets/good/ 2>/dev/null; then
+            # Check it's not an env var reference
+            if ! grep -rq '\$' test-configs/secrets/good/; then
+              echo "::warning::Secrets good configs may contain hardcoded values"
+            fi
+          fi
+          echo "✓ Secrets good configs reviewed"
+          
+          # Network good - should NOT contain 0.0.0.0
+          if grep -rq "0\.0\.0\.0" test-configs/network/good/; then
+            echo "::error::Network good configs should not contain 0.0.0.0"
+            exit 1
+          fi
+          echo "✓ Network good configs do not expose 0.0.0.0"
+          
+          # TLS good - should only have TLSv1.2 or TLSv1.3
+          if grep -rq "TLSv1[^.]" test-configs/tls/good/; then
+            echo "::error::TLS good configs should not contain TLSv1.0 or TLSv1.1"
+            exit 1
+          fi
+          echo "✓ TLS good configs use modern TLS only"
+
+      - name: Test fixture documentation exists
+        run: |
+          if [ ! -f "test-configs/README.md" ]; then
+            echo "::error::Missing test-configs/README.md"
+            exit 1
+          fi
+          echo "✓ Test fixture documentation exists"
+          
+          if [ ! -f "docs/SOFTWARE-MISCONFIGURATIONS.md" ]; then
+            echo "::error::Missing docs/SOFTWARE-MISCONFIGURATIONS.md"
+            exit 1
+          fi
+          echo "✓ Config scanner documentation exists"

@@ -1,0 +1,36 @@
+# docker-compose with proper internal networking - SHOULD NOT TRIGGER
+
+version: '3.8'
+
+services:
+  # Database only accessible within docker network
+  mysql:
+    image: mysql:8
+    # No ports exposed to host
+    expose:
+      - "3306"
+    networks:
+      - internal
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      
+  redis:
+    image: redis:7
+    expose:
+      - "6379"
+    networks:
+      - internal
+      
+  # Only the web app is exposed, bound to localhost
+  app:
+    image: myapp:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - internal
+      - external
+      
+networks:
+  internal:
+    internal: true
+  external:

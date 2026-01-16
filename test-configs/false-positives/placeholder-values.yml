@@ -1,0 +1,16 @@
+# Config with placeholder values - SHOULD NOT TRIGGER
+# These are obviously not real secrets
+
+services:
+  database:
+    environment:
+      # Placeholder/example values
+      DB_PASSWORD: "CHANGE_ME"
+      DB_PASSWORD: "your-password-here"
+      DB_PASSWORD: "<your-password>"
+      DB_PASSWORD: "[INSERT PASSWORD]"
+      DB_PASSWORD: "xxxxxxxx"
+      DB_PASSWORD: "********"
+      API_KEY: "your-api-key-here"
+      API_KEY: "${API_KEY}"
+      API_KEY: "TODO: add key"
