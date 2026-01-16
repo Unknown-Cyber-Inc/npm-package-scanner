@@ -1,5 +1,6 @@
 # Example workflow: Scan software packages on every push
 # Copy this file to your repo's .github/workflows/ directory
+# Customize the paths filter and install step for your ecosystem(s)
 
 name: Security Scan
 
@@ -7,17 +8,67 @@ on:
   push:
     branches: [main, master]
     paths:
+      # npm/Node.js
       - 'package.json'
       - 'package-lock.json'
       - 'yarn.lock'
       - 'pnpm-lock.yaml'
+      # Python/pip
+      - 'requirements.txt'
+      - 'requirements*.txt'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'Pipfile.lock'
+      # Rust/Cargo
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      # Go
+      - 'go.mod'
+      - 'go.sum'
+      # Ruby
+      - 'Gemfile'
+      - 'Gemfile.lock'
+      - '*.gemspec'
+      # .NET/NuGet
+      - '*.csproj'
+      - 'packages.config'
+      - '*.nuspec'
+      # Maven/Java
+      - 'pom.xml'
+      - 'build.gradle'
+      - 'build.gradle.kts'
   pull_request:
     branches: [main, master]
     paths:
+      # npm/Node.js
       - 'package.json'
       - 'package-lock.json'
       - 'yarn.lock'
       - 'pnpm-lock.yaml'
+      # Python/pip
+      - 'requirements.txt'
+      - 'requirements*.txt'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'Pipfile.lock'
+      # Rust/Cargo
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      # Go
+      - 'go.mod'
+      - 'go.sum'
+      # Ruby
+      - 'Gemfile'
+      - 'Gemfile.lock'
+      - '*.gemspec'
+      # .NET/NuGet
+      - '*.csproj'
+      - 'packages.config'
+      - '*.nuspec'
+      # Maven/Java
+      - 'pom.xml'
+      - 'build.gradle'
+      - 'build.gradle.kts'
   # Allow manual trigger
   workflow_dispatch:
 
@@ -30,6 +81,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Customize these setup/install steps for your ecosystem(s)
+      # The scanner auto-detects packages after your build/install step
+      
+      # Example: Node.js/npm
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -38,6 +93,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+      
+      # Example: Python/pip (uncomment if needed)
+      # - name: Setup Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.11'
+      # - run: pip install -r requirements.txt
 
       - name: Scan packages
         id: scan

@@ -1,10 +1,22 @@
-# Test workflow for the package-binary-scanner action
+# Test workflow for the uc-software-scan action
 name: Test Action
 
 on:
   push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'examples/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'examples/**'
   workflow_dispatch:
 
 jobs:

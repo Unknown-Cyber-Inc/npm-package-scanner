@@ -120,6 +120,12 @@ Beyond security scanning, uploading to UnknownCyber builds a **centralized inven
 | **Security Hardening** | Verify ASLR, DEP, stack canaries, and other protections |
 | **SBOM Generation** | Software Bill of Materials in SPDX/CycloneDX formats |
 
+### 🎬 See It in Action
+
+Want to see these capabilities working on a real project? Check out the **[UC Software Scan Demo](docs/UC-SOFTWARE-SCAN-DEMO.md)** — a walkthrough of a mock project evolving over multiple releases, demonstrating binary detection, vulnerability scanning, and malware injection testing.
+
+👉 **[Demo Repository](https://github.com/Unknown-Cyber-Inc/uc-scanner-demo)** | **[Demo Documentation](docs/UC-SOFTWARE-SCAN-DEMO.md)**
+
 ## Features
 
 - 🔍 **Comprehensive Detection**: Identifies binaries by file extension and magic bytes
